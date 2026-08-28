@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>EcoTravel uses the camera to recognise cultural and heritage attractions.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>EcoTravel uses your photo library to recognise cultural and heritage attractions.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>EcoTravel uses your location to find nearby heritage attractions.</string>
 </dict>
 </plist>
