@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/heritage_nearby_service.dart';
+import '../widgets/heritage_image.dart';
 import 'heritage_detail_page.dart';
 
 class NearbyHeritagePage extends StatefulWidget {
@@ -124,13 +125,13 @@ class _NearbyHeritagePageState extends State<NearbyHeritagePage> {
                     onPressed: _checking ? null : _check,
                     icon: _checking
                         ? const SizedBox(
-                            width: 17,
-                            height: 17,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
+                      width: 17,
+                      height: 17,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
                         : const Icon(Icons.my_location),
                     label: Text(_checking ? 'Checking...' : 'Check Nearby Heritage'),
                   ),
@@ -162,47 +163,46 @@ class _NearbyHeritagePageState extends State<NearbyHeritagePage> {
             ),
             const SizedBox(height: 10),
             ..._results.map((result) => Padding(
-                  padding: const EdgeInsets.only(bottom: 11),
-                  child: Material(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.all(9),
-                      leading: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.asset(
-                          result.attraction.imageAsset,
-                          width: 58,
-                          height: 68,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      title: Text(
-                        result.attraction.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 13,
-                        ),
-                      ),
-                      subtitle: Text(
-                        '${result.distanceMeters.round()} m away\n${result.attraction.state}, Malaysia',
-                        style: const TextStyle(fontSize: 10.5),
-                      ),
-                      isThreeLine: true,
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => HeritageDetailPage(
-                              attraction: result.attraction,
-                            ),
-                          ),
-                        );
-                      },
+              padding: const EdgeInsets.only(bottom: 11),
+              child: Material(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.all(9),
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: HeritageImage(
+                      imageUrl: result.attraction.imageUrl,
+                      width: 58,
+                      height: 68,
                     ),
                   ),
-                )),
+                  title: Text(
+                    result.attraction.name,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${result.distanceMeters.round()} m away\n${result.attraction.state}, Malaysia',
+                    style: const TextStyle(fontSize: 10.5),
+                  ),
+                  isThreeLine: true,
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => HeritageDetailPage(
+                          attraction: result.attraction,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            )),
           ],
         ],
       ),

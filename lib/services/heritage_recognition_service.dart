@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
-
-import '../data/heritage_data.dart';
+import 'package:http_parser/http_parser.dart';
 import '../models/heritage_attraction.dart';
+import 'heritage_firestore_service.dart';
 
 class HeritageRecognitionResult {
   const HeritageRecognitionResult({
@@ -17,20 +17,41 @@ class HeritageRecognitionResult {
 }
 
 class HeritageRecognitionService {
-  // Android emulator -> computer localhost.
-  // For a physical Android phone, replace this with your PC IPv4 address,
-  // for example: http://192.168.0.20:8000
+  HeritageRecognitionService({HeritageFirestoreService? firestoreService})
+      : _firestoreService = firestoreService ?? HeritageFirestoreService();
+
   static const String baseUrl = 'http://10.0.2.2:8000';
+  final HeritageFirestoreService _firestoreService;
 
   Future<HeritageRecognitionResult> recognize(File imageFile) async {
     final request = http.MultipartRequest(
       'POST',
       Uri.parse('$baseUrl/recognize'),
     );
-    request.files.add(
-      await http.MultipartFile.fromPath('file', imageFile.path),
-    );
+    final extension = imageFile.path.split('.').last.toLowerCase();
 
+    MediaType contentType;
+
+    switch (extension) {
+      case 'png':
+        contentType = MediaType('image', 'png');
+        break;
+      case 'webp':
+        contentType = MediaType('image', 'webp');
+        break;
+      case 'jpeg':
+      case 'jpg':
+      default:
+        contentType = MediaType('image', 'jpeg');
+    }
+
+    request.files.add(
+      await http.MultipartFile.fromPath(
+        'file',
+        imageFile.path,
+        contentType: contentType,
+      ),
+    );
     final streamed = await request.send().timeout(const Duration(seconds: 45));
     final response = await http.Response.fromStream(streamed);
 
@@ -46,9 +67,12 @@ class HeritageRecognitionService {
         .where((value) => value.trim().isNotEmpty)
         .toList();
 
+    final attraction =
+    await _firestoreService.findByVisionCandidates(candidates);
+
     return HeritageRecognitionResult(
       candidates: candidates,
-      attraction: HeritageData.findByVisionCandidates(candidates),
+      attraction: attraction,
     );
   }
 }
