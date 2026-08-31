@@ -43,3 +43,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local API keys - never commit the real file, only env.json
+env.json
+apikey.txt

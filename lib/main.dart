@@ -1,3 +1,4 @@
+import 'package:collaborative_asg/views/ride_home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 
@@ -31,7 +32,8 @@ class MyApp extends StatelessWidget {
       ),
 
       // Temporary: directly open Admin Login
-      home: const AdminLoginPage(),
+     // home: const AdminLoginPage(),
+      home: const TransportationPage(),
     );
   }
 }

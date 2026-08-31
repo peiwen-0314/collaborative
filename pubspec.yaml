@@ -47,6 +47,11 @@ dependencies:
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
 
+  # Real interactive map (tiles + markers + route line) for the
+  # transportation module's live navigation screen.
+  flutter_map: ^8.0.0
+  latlong2: ^0.9.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
