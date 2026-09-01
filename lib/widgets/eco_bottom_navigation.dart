@@ -19,11 +19,8 @@ class EcoBottomNavigation extends StatelessWidget {
     this.onProfileTap,
   });
 
-  static const Color mainGreen =
-  Color(0xFF2E7D32);
-
-  static const Color inactiveColor =
-  Color(0xFF777777);
+  static const Color mainGreen = Color(0xFF2E7D32);
+  static const Color inactiveColor = Color(0xFF777777);
 
   @override
   Widget build(BuildContext context) {
@@ -41,9 +38,7 @@ class EcoBottomNavigation extends StatelessWidget {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(
-                alpha: 0.04,
-              ),
+              color: Colors.black.withValues(alpha: 0.04),
               blurRadius: 8,
               offset: const Offset(0, -2),
             ),
@@ -58,11 +53,8 @@ class EcoBottomNavigation extends StatelessWidget {
               selectedIcon: Icons.home,
               onTap: onHomeTap,
             ),
-
             _transportItem(),
-
             _planTripItem(),
-
             _navItem(
               index: 3,
               label: 'Community',
@@ -70,7 +62,6 @@ class EcoBottomNavigation extends StatelessWidget {
               selectedIcon: Icons.groups,
               onTap: onCommunityTap,
             ),
-
             _navItem(
               index: 4,
               label: 'Profile',
@@ -84,10 +75,6 @@ class EcoBottomNavigation extends StatelessWidget {
     );
   }
 
-  // ============================================================
-  // NORMAL ITEM
-  // ============================================================
-
   Widget _navItem({
     required int index,
     required String label,
@@ -95,11 +82,8 @@ class EcoBottomNavigation extends StatelessWidget {
     required IconData selectedIcon,
     required VoidCallback? onTap,
   }) {
-    final bool selected =
-        currentIndex == index;
-
-    final Color color =
-    selected ? mainGreen : inactiveColor;
+    final bool selected = currentIndex == index;
+    final Color color = selected ? mainGreen : inactiveColor;
 
     return Expanded(
       child: InkWell(
@@ -107,30 +91,23 @@ class EcoBottomNavigation extends StatelessWidget {
         child: SizedBox(
           height: double.infinity,
           child: Column(
-            mainAxisAlignment:
-            MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                selected
-                    ? selectedIcon
-                    : icon,
+                selected ? selectedIcon : icon,
                 size: 22,
                 color: color,
               ),
-
               const SizedBox(height: 3),
-
               Text(
                 label,
                 maxLines: 1,
-                overflow:
-                TextOverflow.ellipsis,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 9,
                   color: color,
-                  fontWeight: selected
-                      ? FontWeight.w600
-                      : FontWeight.w400,
+                  fontWeight:
+                  selected ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
             ],
@@ -140,13 +117,8 @@ class EcoBottomNavigation extends StatelessWidget {
     );
   }
 
-  // ============================================================
-  // TRANSPORT
-  // ============================================================
-
   Widget _transportItem() {
-    final bool selected =
-        currentIndex == 1;
+    final bool selected = currentIndex == 1;
 
     return Expanded(
       child: InkWell(
@@ -154,8 +126,7 @@ class EcoBottomNavigation extends StatelessWidget {
         child: SizedBox(
           height: double.infinity,
           child: Column(
-            mainAxisAlignment:
-            MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Image.asset(
                 selected
@@ -165,22 +136,16 @@ class EcoBottomNavigation extends StatelessWidget {
                 height: 23,
                 fit: BoxFit.contain,
               ),
-
               const SizedBox(height: 3),
-
               Text(
                 'Transport',
                 maxLines: 1,
-                overflow:
-                TextOverflow.ellipsis,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 9,
-                  color: selected
-                      ? mainGreen
-                      : inactiveColor,
-                  fontWeight: selected
-                      ? FontWeight.w600
-                      : FontWeight.w400,
+                  color: selected ? mainGreen : inactiveColor,
+                  fontWeight:
+                  selected ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
             ],
@@ -190,13 +155,8 @@ class EcoBottomNavigation extends StatelessWidget {
     );
   }
 
-  // ============================================================
-  // PLAN TRIP
-  // ============================================================
-
   Widget _planTripItem() {
-    final bool selected =
-        currentIndex == 2;
+    final bool selected = currentIndex == 2;
 
     return Expanded(
       child: InkWell(
@@ -204,44 +164,31 @@ class EcoBottomNavigation extends StatelessWidget {
         child: SizedBox(
           height: double.infinity,
           child: Column(
-            mainAxisAlignment:
-            MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
                 width: selected ? 37 : 27,
                 height: selected ? 37 : 27,
                 decoration: BoxDecoration(
-                  color: selected
-                      ? mainGreen
-                      : Colors.transparent,
+                  color: selected ? mainGreen : Colors.transparent,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.eco,
                   size: selected ? 22 : 23,
-                  color: selected
-                      ? Colors.white
-                      : inactiveColor,
+                  color: selected ? Colors.white : inactiveColor,
                 ),
               ),
-
-              SizedBox(
-                height: selected ? 1 : 3,
-              ),
-
+              SizedBox(height: selected ? 1 : 3),
               Text(
                 'Plan Trip',
                 maxLines: 1,
-                overflow:
-                TextOverflow.ellipsis,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 9,
-                  color: selected
-                      ? mainGreen
-                      : inactiveColor,
-                  fontWeight: selected
-                      ? FontWeight.w600
-                      : FontWeight.w400,
+                  color: selected ? mainGreen : inactiveColor,
+                  fontWeight:
+                  selected ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
             ],

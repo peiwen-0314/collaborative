@@ -203,19 +203,21 @@ class AttractionController extends ChangeNotifier {
 
   Future<void> pickImages() async {
     try {
-      final FilePickerResult? result = await FilePicker.pickFiles(
-        allowMultiple: true,
+      final List<PlatformFile> files = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
-        withData: true,
       );
 
-      if (result == null) return;
+      if (files.isEmpty) return;
 
-      for (final PlatformFile file in result.files) {
-        if (file.bytes == null) continue;
+      for (final PlatformFile file in files) {
+        final Uint8List bytes = await file.readAsBytes();
+
         _selectedImages.add(
-          SelectedAttractionImage(name: file.name, bytes: file.bytes!),
+          SelectedAttractionImage(
+            name: file.name,
+            bytes: bytes,
+          ),
         );
       }
 
