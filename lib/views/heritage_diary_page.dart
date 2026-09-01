@@ -25,6 +25,7 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
 
   final HeritageStorageService _storage = HeritageStorageService();
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _timelineController = ScrollController();
 
   bool _loading = true;
   bool _newestFirst = true;
@@ -57,6 +58,7 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
   @override
   void dispose() {
     _searchController.dispose();
+    _timelineController.dispose();
     super.dispose();
   }
 
@@ -126,11 +128,23 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
       initialDate = DateTime.now();
     }
 
+    final now = DateTime.now();
+    final today = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
+    // Future dates are not allowed.
+    if (initialDate.isAfter(today)) {
+      initialDate = today;
+    }
+
     final picked = await showDatePicker(
       context: context,
       initialDate: initialDate,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2035),
+      firstDate: DateTime(2020, 1, 1),
+      lastDate: today,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -147,8 +161,45 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
 
     if (picked == null) return;
 
+    final pickedDate = DateTime(
+      picked.year,
+      picked.month,
+      picked.day,
+    );
+
     setState(() {
-      _selectedDate = picked;
+      _selectedDate = pickedDate;
+    });
+
+    // Make the chosen calendar date visible in the horizontal timeline.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_timelineController.hasClients) return;
+
+      final dayDifference = today.difference(pickedDate).inDays;
+
+      // Each timeline item has a fixed width of 66.
+      const itemWidth = 66.0;
+
+      final viewportWidth =
+          _timelineController.position.viewportDimension;
+
+      // Place the selected day roughly in the middle of the visible timeline.
+      final targetOffset =
+          (dayDifference * itemWidth) -
+              ((viewportWidth - itemWidth) / 2);
+
+      final safeOffset = targetOffset
+          .clamp(
+        0.0,
+        _timelineController.position.maxScrollExtent,
+      )
+          .toDouble();
+
+      _timelineController.animateTo(
+        safeOffset,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+      );
     });
   }
 
@@ -343,30 +394,21 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
   // ============================================================
 
   Widget _buildTimeline() {
-    DateTime anchor;
+    final now = DateTime.now();
 
-    if (_selectedDate != null) {
-      anchor = _selectedDate!;
-    } else if (_entries.isNotEmpty) {
-      anchor = _entries
-          .map((entry) => entry.savedAt.toLocal())
-          .reduce((a, b) => a.isAfter(b) ? a : b);
-    } else {
-      anchor = DateTime.now();
-    }
-
+    // Today is always the newest/right-most date.
     final anchorDate = DateTime(
-      anchor.year,
-      anchor.month,
-      anchor.day,
+      now.year,
+      now.month,
+      now.day,
     );
 
-    final days = List.generate(
-      4,
-          (index) => anchorDate.subtract(
-        Duration(days: 3 - index),
-      ),
-    );
+    // Match the date picker's first available date.
+    final firstTimelineDate = DateTime(2020, 1, 1);
+
+    // Generate every day from 1 Jan 2020 until today.
+    final totalDays =
+        anchorDate.difference(firstTimelineDate).inDays + 1;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(7, 0, 7, 12),
@@ -384,37 +426,50 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
 
           const SizedBox(height: 9),
 
-          Row(
-            children: List.generate(days.length, (index) {
-              final date = days[index];
+          SizedBox(
+            height: 58,
+            child: ListView.builder(
+              controller: _timelineController,
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              physics: const BouncingScrollPhysics(),
+              itemCount: totalDays,
+              itemBuilder: (context, index) {
+                final date = anchorDate.subtract(
+                  Duration(days: index),
+                );
 
-              final count = _entries.where((entry) {
-                final saved = entry.savedAt.toLocal();
-                return _sameDay(saved, date);
-              }).length;
+                final count = _entries.where((entry) {
+                  final saved = entry.savedAt.toLocal();
+                  return _sameDay(saved, date);
+                }).length;
 
-              final selected = _selectedDate != null
-                  ? _sameDay(_selectedDate!, date)
-                  : index == 3;
+                final selected = _selectedDate != null
+                    ? _sameDay(_selectedDate!, date)
+                    : index == 0;
 
-              return Expanded(
-                child: _buildTimelineItem(
-                  date: date,
-                  count: count,
-                  selected: selected,
-                  onTap: () {
-                    setState(() {
-                      if (_selectedDate != null &&
-                          _sameDay(_selectedDate!, date)) {
-                        _selectedDate = null;
-                      } else {
-                        _selectedDate = date;
-                      }
-                    });
-                  },
-                ),
-              );
-            }),
+                return SizedBox(
+                  width: 66,
+                  child: _buildTimelineItem(
+                    date: date,
+                    count: count,
+                    selected: selected,
+                    showLeftLine: index != totalDays - 1,
+                    showRightLine: index != 0,
+                    onTap: () {
+                      setState(() {
+                        if (_selectedDate != null &&
+                            _sameDay(_selectedDate!, date)) {
+                          _selectedDate = null;
+                        } else {
+                          _selectedDate = date;
+                        }
+                      });
+                    },
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -425,36 +480,62 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
     required DateTime date,
     required int count,
     required bool selected,
+    required bool showLeftLine,
+    required bool showRightLine,
     required VoidCallback onTap,
   }) {
+    const Color lineColor = Color(0xFFA9C9A5);
+
     return GestureDetector(
       onTap: onTap,
+      behavior: HitTestBehavior.opaque,
       child: Column(
         children: [
-          Container(
-            width: 34,
+          SizedBox(
+            width: 66,
             height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: selected ? green : Colors.white,
-              shape: BoxShape.circle,
-              border: selected
-                  ? null
-                  : Border.all(
-                color: const Color(0xFFD0D0D0),
-              ),
-            ),
-            child: Text(
-              '${date.day}\n${_months[date.month - 1]}',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: selected
-                    ? Colors.white
-                    : Colors.black87,
-                fontSize: 7.5,
-                height: 1.05,
-                fontWeight: FontWeight.w600,
-              ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Connecting line behind the circles.
+                Positioned(
+                  left: showLeftLine ? 0 : 33,
+                  right: showRightLine ? 0 : 33,
+                  top: 16,
+                  child: Container(
+                    height: 1.4,
+                    color: lineColor,
+                  ),
+                ),
+
+                // Date circle.
+                Container(
+                  width: 34,
+                  height: 34,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: selected ? green : Colors.white,
+                    shape: BoxShape.circle,
+                    border: selected
+                        ? null
+                        : Border.all(
+                      color: const Color(0xFFD0D0D0),
+                    ),
+                  ),
+                  child: Text(
+                    '${date.day}\n${_months[date.month - 1]}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: selected
+                          ? Colors.white
+                          : Colors.black87,
+                      fontSize: 7.5,
+                      height: 1.05,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
 
@@ -463,9 +544,7 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
           Text(
             '$count ${count == 1 ? 'place' : 'places'}',
             style: TextStyle(
-              color: selected
-                  ? green
-                  : Colors.black54,
+              color: selected ? green : Colors.black54,
               fontSize: 7.5,
               fontWeight: selected
                   ? FontWeight.w700
@@ -620,7 +699,7 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
           );
         },
 
-        // Long press = remove
+        // Long press = remove (alternative to delete icon)
         onLongPress: () => _removeEntry(entry),
 
         child: Container(
@@ -653,15 +732,25 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
                   crossAxisAlignment:
                   CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      attraction.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 9,
-                        color: Colors.black,
-                        fontWeight: FontWeight.w800,
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            attraction.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 9,
+                              color: Colors.black,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(width: 4),
+
+
+                      ],
                     ),
 
                     const SizedBox(height: 4),
@@ -824,7 +913,7 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
                 child: const Text(
                   'View On Map',
                   style: TextStyle(
-                    fontSize: 3.8,
+                    fontSize: 5,
                     color: Colors.black87,
                     fontWeight: FontWeight.w500,
                   ),

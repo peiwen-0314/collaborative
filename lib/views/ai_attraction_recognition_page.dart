@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../models/heritage_attraction.dart';
@@ -88,8 +89,32 @@ class _AiAttractionRecognitionPageState
       return;
     }
 
+    final croppedImage = await ImageCropper().cropImage(
+      sourcePath: selected.path,
+      compressFormat: ImageCompressFormat.jpg,
+      compressQuality: 80,
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: 'Select Attraction Area',
+          toolbarColor: green,
+          toolbarWidgetColor: Colors.white,
+          activeControlsWidgetColor: green,
+          lockAspectRatio: false,
+          hideBottomControls: false,
+        ),
+        IOSUiSettings(
+          title: 'Select Attraction Area',
+          aspectRatioLockEnabled: false,
+        ),
+      ],
+    );
+
+    if (croppedImage == null || !mounted) {
+      return;
+    }
+
     setState(() {
-      _image = selected;
+      _image = XFile(croppedImage.path);
       _attraction = null;
       _candidates = const [];
       _message = null;
@@ -783,44 +808,40 @@ class _AiAttractionRecognitionPageState
     required String value,
   }) {
     return Row(
-      crossAxisAlignment:
-      CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Icon(
           icon,
           color: green,
-          size: 13,
+          size: 14,
         ),
 
         const SizedBox(width: 4),
 
         Expanded(
           child: Column(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 title,
                 maxLines: 2,
                 style: const TextStyle(
                   color: green,
-                  fontSize: 5.4,
-                  fontWeight:
-                  FontWeight.w700,
+                  fontSize: 6.3,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
 
-              const SizedBox(height: 2),
+              const SizedBox(height: 3),
 
               Text(
                 value,
                 maxLines: 2,
-                overflow:
-                TextOverflow.ellipsis,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Colors.black54,
-                  fontSize: 4.7,
-                  height: 1.2,
+                  fontSize: 5.5,
+                  height: 1.25,
                 ),
               ),
             ],
@@ -878,7 +899,7 @@ class _AiAttractionRecognitionPageState
                   'View All >',
                   style: TextStyle(
                     color: green,
-                    fontSize: 6.5,
+                    fontSize: 8,
                     fontWeight:
                     FontWeight.w600,
                   ),
@@ -1012,7 +1033,7 @@ class _AiAttractionRecognitionPageState
                     style: const TextStyle(
                       color:
                       Colors.black87,
-                      fontSize: 7,
+                      fontSize: 9,
                       fontWeight:
                       FontWeight.w700,
                     ),
@@ -1029,7 +1050,7 @@ class _AiAttractionRecognitionPageState
                     style: const TextStyle(
                       color:
                       Colors.black45,
-                      fontSize: 5,
+                      fontSize: 7,
                     ),
                   ),
 
@@ -1043,7 +1064,7 @@ class _AiAttractionRecognitionPageState
                     const TextStyle(
                       color:
                       Colors.black45,
-                      fontSize: 5,
+                      fontSize: 6,
                     ),
                   ),
 

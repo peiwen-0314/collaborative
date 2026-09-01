@@ -53,6 +53,7 @@ dependencies:
   google_navigation_flutter: ^0.10.0
   # Used by transportation proximity calculations for live stops/bike docks.
   latlong2: ^0.9.1
+  image_cropper: ^12.2.1
 
 dev_dependencies:
   flutter_test:

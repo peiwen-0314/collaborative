@@ -1,25 +1,27 @@
 import 'package:flutter/material.dart';
 
 class AdminSidebar extends StatelessWidget {
-  final String selectedPage;
-
-  final VoidCallback onDashboardTap;
-  final VoidCallback onAttractionTap;
-  final VoidCallback onStampTap;
-  final VoidCallback onCategoryTap;
-  final VoidCallback onReportTap;
-  final VoidCallback onLogoutTap;
-
   const AdminSidebar({
     super.key,
     required this.selectedPage,
     required this.onDashboardTap,
     required this.onAttractionTap,
-    required this.onStampTap,
     required this.onCategoryTap,
+    required this.onCulturalHeritageTap,
+    required this.onStampTap,
     required this.onReportTap,
     required this.onLogoutTap,
   });
+
+  final String selectedPage;
+
+  final VoidCallback onDashboardTap;
+  final VoidCallback onAttractionTap;
+  final VoidCallback onCategoryTap;
+  final VoidCallback onCulturalHeritageTap;
+  final VoidCallback onStampTap;
+  final VoidCallback onReportTap;
+  final VoidCallback onLogoutTap;
 
   static const Color mainGreen = Color(0xFF2E7D32);
 
@@ -35,7 +37,6 @@ class AdminSidebar extends StatelessWidget {
           // =====================================================
           // LOGO
           // =====================================================
-
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -47,6 +48,7 @@ class AdminSidebar extends StatelessWidget {
               ),
             ],
           ),
+
           const Text(
             'Admin Portal',
             style: TextStyle(
@@ -58,9 +60,8 @@ class AdminSidebar extends StatelessWidget {
           const SizedBox(height: 35),
 
           // =====================================================
-          // MENU
+          // DASHBOARD
           // =====================================================
-
           sidebarItem(
             icon: Icons.home_outlined,
             title: 'Dashboard',
@@ -68,6 +69,9 @@ class AdminSidebar extends StatelessWidget {
             onTap: onDashboardTap,
           ),
 
+          // =====================================================
+          // ATTRACTION MANAGEMENT
+          // =====================================================
           sidebarItem(
             icon: Icons.place_outlined,
             title: 'Attraction Management',
@@ -75,13 +79,29 @@ class AdminSidebar extends StatelessWidget {
             onTap: onAttractionTap,
           ),
 
+          // =====================================================
+          // CATEGORY MANAGEMENT
+          // =====================================================
           sidebarItem(
-            icon: Icons.people_outline,
+            icon: Icons.category_outlined,
             title: 'Categories Management',
             selected: selectedPage == 'category',
             onTap: onCategoryTap,
           ),
 
+          // =====================================================
+          // CULTURAL & HERITAGE MANAGEMENT
+          // =====================================================
+          sidebarItem(
+            icon: Icons.account_balance_outlined,
+            title: 'Cultural & Heritage',
+            selected: selectedPage == 'culturalHeritage',
+            onTap: onCulturalHeritageTap,
+          ),
+
+          // =====================================================
+          // STAMP MANAGEMENT
+          // =====================================================
           sidebarItem(
             icon: Icons.card_giftcard_outlined,
             title: 'Stamp Management',
@@ -89,6 +109,9 @@ class AdminSidebar extends StatelessWidget {
             onTap: onStampTap,
           ),
 
+          // =====================================================
+          // REPORTS & BOOKING
+          // =====================================================
           sidebarItem(
             icon: Icons.analytics_outlined,
             title: 'Reports & Booking',
@@ -102,6 +125,9 @@ class AdminSidebar extends StatelessWidget {
             color: Colors.white24,
           ),
 
+          // =====================================================
+          // LOGOUT
+          // =====================================================
           sidebarItem(
             icon: Icons.logout,
             title: 'Logout',
@@ -117,7 +143,6 @@ class AdminSidebar extends StatelessWidget {
   // ============================================================
   // SIDEBAR ITEM
   // ============================================================
-
   Widget sidebarItem({
     required IconData icon,
     required String title,

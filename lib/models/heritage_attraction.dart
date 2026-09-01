@@ -20,6 +20,16 @@ class HeritageAttraction {
     required this.audioEnglish,
     required this.audioMalay,
     required this.audioChinese,
+
+    // Extra historical-information fields.
+    this.yearBuilt = '',
+    this.architecturalStyle = '',
+    this.heritageStatus = '',
+    this.conservationGuidelines = const <String>[],
+    this.visitorEtiquetteItems = const <String>[],
+    this.dressCode = const <String>[],
+    this.photographyRestrictions = const <String>[],
+    this.preservationPractices = const <String>[],
   });
 
   final String id;
@@ -43,7 +53,30 @@ class HeritageAttraction {
   final String audioMalay;
   final String audioChinese;
 
-  String get locationText => '$state, Malaysia';
+  // New fields used by the Historical Information design.
+  final String yearBuilt;
+  final String architecturalStyle;
+  final String heritageStatus;
+  final List<String> conservationGuidelines;
+  final List<String> visitorEtiquetteItems;
+  final List<String> dressCode;
+  final List<String> photographyRestrictions;
+  final List<String> preservationPractices;
+
+  String get locationText {
+    final cleanCity = city.trim();
+    final cleanState = state.trim();
+
+    if (cleanCity.isEmpty) {
+      return '$cleanState, Malaysia';
+    }
+
+    if (cleanCity.toLowerCase() == cleanState.toLowerCase()) {
+      return '$cleanState, Malaysia';
+    }
+
+    return '$cleanCity, $cleanState, Malaysia';
+  }
 
   factory HeritageAttraction.fromFirestore(
       String documentId,
@@ -56,6 +89,7 @@ class HeritageAttraction {
 
     List<String> asStringList(dynamic value) {
       if (value is! List) return const <String>[];
+
       return value
           .map((item) => item.toString().trim())
           .where((item) => item.isNotEmpty)
@@ -75,7 +109,8 @@ class HeritageAttraction {
       openingHours: data['openingHours']?.toString() ?? '',
       shortDescription: data['shortDescription']?.toString() ?? '',
       history: data['history']?.toString() ?? '',
-      culturalSignificance: data['culturalSignificance']?.toString() ?? '',
+      culturalSignificance:
+      data['culturalSignificance']?.toString() ?? '',
       visitorEtiquette: data['visitorEtiquette']?.toString() ?? '',
       sustainabilityTip: data['sustainabilityTip']?.toString() ?? '',
       recommendedTime: data['recommendedTime']?.toString() ?? '',
@@ -83,6 +118,20 @@ class HeritageAttraction {
       audioEnglish: data['audioEnglish']?.toString() ?? '',
       audioMalay: data['audioMalay']?.toString() ?? '',
       audioChinese: data['audioChinese']?.toString() ?? '',
+
+      // New Firestore fields.
+      yearBuilt: data['yearBuilt']?.toString() ?? '',
+      architecturalStyle: data['architecturalStyle']?.toString() ?? '',
+      heritageStatus: data['heritageStatus']?.toString() ?? '',
+      conservationGuidelines:
+      asStringList(data['conservationGuidelines']),
+      visitorEtiquetteItems:
+      asStringList(data['visitorEtiquetteItems']),
+      dressCode: asStringList(data['dressCode']),
+      photographyRestrictions:
+      asStringList(data['photographyRestrictions']),
+      preservationPractices:
+      asStringList(data['preservationPractices']),
     );
   }
 
@@ -108,6 +157,16 @@ class HeritageAttraction {
       'audioEnglish': audioEnglish,
       'audioMalay': audioMalay,
       'audioChinese': audioChinese,
+
+      // New historical-information fields.
+      'yearBuilt': yearBuilt,
+      'architecturalStyle': architecturalStyle,
+      'heritageStatus': heritageStatus,
+      'conservationGuidelines': conservationGuidelines,
+      'visitorEtiquetteItems': visitorEtiquetteItems,
+      'dressCode': dressCode,
+      'photographyRestrictions': photographyRestrictions,
+      'preservationPractices': preservationPractices,
     };
   }
 }
