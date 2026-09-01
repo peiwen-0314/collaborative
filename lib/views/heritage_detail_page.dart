@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/heritage_attraction.dart';
 import '../services/heritage_storage_service.dart';
+import '../widgets/heritage_image.dart';
 import 'heritage_diary_page.dart';
 
 class HeritageDetailPage extends StatefulWidget {
@@ -85,7 +86,7 @@ class _HeritageDetailPageState extends State<HeritageDetailPage> {
     final attraction = widget.attraction;
     final uri = Uri.parse(
       'https://www.google.com/maps/search/?api=1&query='
-      '${attraction.latitude},${attraction.longitude}',
+          '${attraction.latitude},${attraction.longitude}',
     );
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
@@ -124,11 +125,10 @@ class _HeritageDetailPageState extends State<HeritageDetailPage> {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(18),
-              child: Image.asset(
-                attraction.imageAsset,
+              child: HeritageImage(
+                imageUrl: attraction.imageUrl,
                 width: double.infinity,
                 height: 245,
-                fit: BoxFit.cover,
               ),
             ),
             const SizedBox(height: 18),

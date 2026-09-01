@@ -1,69 +1,198 @@
 import 'package:flutter/material.dart';
 
-import '../core/app_theme.dart';
-
 class EcoBottomNavigation extends StatelessWidget {
+  final int currentIndex;
+
+  final VoidCallback? onHomeTap;
+  final VoidCallback? onTransportTap;
+  final VoidCallback? onPlanTripTap;
+  final VoidCallback? onCommunityTap;
+  final VoidCallback? onProfileTap;
+
   const EcoBottomNavigation({
     super.key,
-    required this.selectedIndex,
-    required this.onSelected,
+    required this.currentIndex,
+    this.onHomeTap,
+    this.onTransportTap,
+    this.onPlanTripTap,
+    this.onCommunityTap,
+    this.onProfileTap,
   });
 
-  final int selectedIndex;
-  final ValueChanged<int> onSelected;
+  static const Color mainGreen = Color(0xFF2E7D32);
+  static const Color inactiveColor = Color(0xFF777777);
 
   @override
   Widget build(BuildContext context) {
-    const items = <({IconData icon, String label})>[
-      (icon: Icons.home_outlined, label: 'Home'),
-      (icon: Icons.commute_outlined, label: 'Transport'),
-      (icon: Icons.eco_outlined, label: 'Plan Trip'),
-      (icon: Icons.track_changes_outlined, label: 'Dashboard'),
-      (icon: Icons.person_outline, label: 'Profile'),
-    ];
-
     return SafeArea(
       top: false,
       child: Container(
-        height: 74,
-        color: Colors.white,
+        height: 68,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(
+            top: BorderSide(
+              color: Colors.grey.shade200,
+              width: 1,
+            ),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: List.generate(items.length, (index) {
-            final selected = index == selectedIndex;
-            return InkWell(
-              onTap: () => onSelected(index),
-              borderRadius: BorderRadius.circular(28),
-              child: SizedBox(
-                width: 64,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 38,
-                      height: 38,
-                      decoration: BoxDecoration(
-                        color: selected ? AppColors.green : Colors.transparent,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        items[index].icon,
-                        color: selected ? Colors.white : AppColors.muted,
-                        size: 25,
-                      ),
-                    ),
-                    Text(
-                      items[index].label,
-                      style: const TextStyle(
-                        fontSize: 8,
-                        color: AppColors.muted,
-                      ),
-                    ),
-                  ],
+          children: [
+            _navItem(
+              index: 0,
+              label: 'Home',
+              icon: Icons.home_outlined,
+              selectedIcon: Icons.home,
+              onTap: onHomeTap,
+            ),
+            _transportItem(),
+            _planTripItem(),
+            _navItem(
+              index: 3,
+              label: 'Community',
+              icon: Icons.groups_outlined,
+              selectedIcon: Icons.groups,
+              onTap: onCommunityTap,
+            ),
+            _navItem(
+              index: 4,
+              label: 'Profile',
+              icon: Icons.person_outline_rounded,
+              selectedIcon: Icons.person_rounded,
+              onTap: onProfileTap,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _navItem({
+    required int index,
+    required String label,
+    required IconData icon,
+    required IconData selectedIcon,
+    required VoidCallback? onTap,
+  }) {
+    final bool selected = currentIndex == index;
+    final Color color = selected ? mainGreen : inactiveColor;
+
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: double.infinity,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                selected ? selectedIcon : icon,
+                size: 22,
+                color: color,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9,
+                  color: color,
+                  fontWeight:
+                  selected ? FontWeight.w600 : FontWeight.w400,
                 ),
               ),
-            );
-          }),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _transportItem() {
+    final bool selected = currentIndex == 1;
+
+    return Expanded(
+      child: InkWell(
+        onTap: onTransportTap,
+        child: SizedBox(
+          height: double.infinity,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Image.asset(
+                selected
+                    ? 'assets/images/electric-vehicle (1).png'
+                    : 'assets/images/electric-vehicle.png',
+                width: 23,
+                height: 23,
+                fit: BoxFit.contain,
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Transport',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9,
+                  color: selected ? mainGreen : inactiveColor,
+                  fontWeight:
+                  selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _planTripItem() {
+    final bool selected = currentIndex == 2;
+
+    return Expanded(
+      child: InkWell(
+        onTap: onPlanTripTap,
+        child: SizedBox(
+          height: double.infinity,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: selected ? 37 : 27,
+                height: selected ? 37 : 27,
+                decoration: BoxDecoration(
+                  color: selected ? mainGreen : Colors.transparent,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.eco,
+                  size: selected ? 22 : 23,
+                  color: selected ? Colors.white : inactiveColor,
+                ),
+              ),
+              SizedBox(height: selected ? 1 : 3),
+              Text(
+                'Plan Trip',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9,
+                  color: selected ? mainGreen : inactiveColor,
+                  fontWeight:
+                  selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

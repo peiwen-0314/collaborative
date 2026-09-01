@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 
 import '../controllers/transport_controller.dart';
@@ -14,6 +13,8 @@ import '../widgets/journey_card.dart';
 import '../widgets/ride_card.dart';
 import 'saved_list_page.dart';
 import 'trip_details_page.dart';
+import 'ai_trip_planner_page.dart';
+import 'home_page.dart';
 
 class TransportationPage extends StatefulWidget {
   const TransportationPage({super.key});
@@ -24,9 +25,6 @@ class TransportationPage extends StatefulWidget {
 
 class _TransportationPageState extends State<TransportationPage> {
   final TransportController _controller = TransportController();
-
-  int _bottomIndex = 2;
-
   /// Null while we're still detecting the user's current location.
   LocationPoint? _from;
 
@@ -102,17 +100,23 @@ class _TransportationPageState extends State<TransportationPage> {
 
   void _showLocationFallbackNotice(LocationLookupStatus status) {
     if (!mounted) return;
+
     final message = switch (status) {
       LocationLookupStatus.permissionDenied =>
-        'Location permission denied - tap "From" to pick your starting point.',
+      'Location permission denied - tap "From" to pick your starting point.',
+
       LocationLookupStatus.serviceDisabled =>
-        'Location services are off - tap "From" to pick your starting point.',
+      'Location services are off - tap "From" to pick your starting point.',
+
       _ =>
-        "Couldn't get an accurate GPS fix - tap From to search a real place.",
+      "Couldn't get an accurate GPS fix - tap From to search a real place.",
     };
+
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<void> _search() async {
@@ -272,24 +276,24 @@ class _TransportationPageState extends State<TransportationPage> {
     if (from == null || to == null) return;
     Navigator.of(context)
         .push(
-          MaterialPageRoute(
-            builder: (_) => TripDetailsPage(from: from, to: to, option: option),
-          ),
-        )
+      MaterialPageRoute(
+        builder: (_) => TripDetailsPage(from: from, to: to, option: option),
+      ),
+    )
         .then((_) => _loadSavedPreview());
   }
 
   void _openSavedTrip(SavedTrip trip) {
     Navigator.of(context)
         .push(
-          MaterialPageRoute(
-            builder: (_) => TripDetailsPage(
-              from: trip.from,
-              to: trip.to,
-              option: trip.option,
-            ),
-          ),
-        )
+      MaterialPageRoute(
+        builder: (_) => TripDetailsPage(
+          from: trip.from,
+          to: trip.to,
+          option: trip.option,
+        ),
+      ),
+    )
         .then((_) => _loadSavedPreview());
   }
 
@@ -297,6 +301,33 @@ class _TransportationPageState extends State<TransportationPage> {
     Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const SavedListPage()))
         .then((_) => _loadSavedPreview());
+  }
+
+
+  void _goHome() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const HomePage(),
+      ),
+    );
+  }
+
+  void _goPlanTrip() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const AiTripPlannerPage(),
+      ),
+    );
+  }
+
+  void _showComingSoon(String page) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$page coming soon'),
+      ),
+    );
   }
 
   @override
@@ -407,8 +438,18 @@ class _TransportationPageState extends State<TransportationPage> {
         ),
       ),
       bottomNavigationBar: EcoBottomNavigation(
-        selectedIndex: _bottomIndex,
-        onSelected: (value) => setState(() => _bottomIndex = value),
+        currentIndex: 1,
+        onHomeTap: _goHome,
+        onTransportTap: () {
+          // Already on Transportation page.
+        },
+        onPlanTripTap: _goPlanTrip,
+        onCommunityTap: () {
+          _showComingSoon('Community');
+        },
+        onProfileTap: () {
+          _showComingSoon('Profile');
+        },
       ),
     );
   }
@@ -523,6 +564,7 @@ class _TransportationPageState extends State<TransportationPage> {
 class _SimulatedDataBanner extends StatelessWidget {
   const _SimulatedDataBanner();
 
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -541,8 +583,8 @@ class _SimulatedDataBanner extends StatelessWidget {
           const Expanded(
             child: Text(
               'Simulated routes - no live HERE API key is set up, so these '
-              'times and waits are an estimate, not a real timetable. Run '
-              'with --dart-define=HERE_API_KEY=... for real schedules.',
+                  'times and waits are an estimate, not a real timetable. Run '
+                  'with --dart-define=HERE_API_KEY=... for real schedules.',
               style: TextStyle(
                 fontSize: 11,
                 color: AppColors.text,
@@ -565,6 +607,7 @@ class RecommendedPanel extends StatelessWidget {
 
   final RideOption option;
   final VoidCallback onTap;
+
 
   @override
   Widget build(BuildContext context) {
@@ -598,6 +641,7 @@ class SectionHeading extends StatelessWidget {
 
   final String title;
   final VoidCallback? onTap;
+
 
   @override
   Widget build(BuildContext context) {

@@ -1,10 +1,8 @@
-import 'dart:math' as math;
-
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 
-import '../data/heritage_data.dart';
 import '../models/heritage_attraction.dart';
+import 'heritage_firestore_service.dart';
 
 class NearbyHeritageResult {
   const NearbyHeritageResult({
@@ -17,8 +15,12 @@ class NearbyHeritageResult {
 }
 
 class HeritageNearbyService {
+  HeritageNearbyService({HeritageFirestoreService? firestoreService})
+      : _firestoreService = firestoreService ?? HeritageFirestoreService();
+
+  final HeritageFirestoreService _firestoreService;
   final FlutterLocalNotificationsPlugin _notifications =
-      FlutterLocalNotificationsPlugin();
+  FlutterLocalNotificationsPlugin();
 
   Future<void> initializeNotifications() async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -28,16 +30,14 @@ class HeritageNearbyService {
     );
 
     final androidImplementation =
-        _notifications.resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+    _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     await androidImplementation?.requestNotificationsPermission();
   }
 
   Future<Position> currentPosition() async {
     final enabled = await Geolocator.isLocationServiceEnabled();
-    if (!enabled) {
-      throw Exception('Location service is turned off.');
-    }
+    if (!enabled) throw Exception('Location service is turned off.');
 
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
@@ -63,9 +63,10 @@ class HeritageNearbyService {
     double radiusMeters = 1000,
   }) async {
     final position = await currentPosition();
+    final attractions = await _firestoreService.getAttractions();
     final results = <NearbyHeritageResult>[];
 
-    for (final attraction in HeritageData.attractions) {
+    for (final attraction in attractions) {
       final distance = Geolocator.distanceBetween(
         position.latitude,
         position.longitude,
