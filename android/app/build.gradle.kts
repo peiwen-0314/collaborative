@@ -4,6 +4,11 @@ plugins {
     id("com.google.gms.google-services")
     // END: FlutterFire Configuration
     id("kotlin-android")
+    // Declared (version-less - the version lives in settings.gradle.kts'
+    // own plugins{} block) but was never actually applied here, which is
+    // why the secrets {} block below couldn't resolve - that extension
+    // function only exists once this plugin is applied to THIS module.
+    id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }

@@ -176,6 +176,66 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     savedAt: DateTime.now(),
   );
 
+  /// A classic mobile "toast" - a small dark rounded pill sized to its
+  /// own text (not a bar stretching the full screen width), centred low
+  /// on the screen, that just fades away on its own after [duration] -
+  /// the same shape/behaviour as a native Android Toast or WeChat's own
+  /// message pill, which is what was actually asked for after the
+  /// previous white card version still didn't read as "how a normal
+  /// app shows this". Every SnackBar this page shows goes through this
+  /// one helper so they all look and behave the same way.
+  void _showSnack(
+    String message, {
+    Duration duration = const Duration(seconds: 2),
+    bool isError = false,
+  }) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: duration,
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          padding: EdgeInsets.zero,
+          margin: const EdgeInsets.only(bottom: 36),
+          // Center + no explicit width on the pill itself, so it wraps
+          // exactly around whatever the message actually is instead of
+          // stretching to fill the screen like a normal SnackBar does -
+          // the ConstrainedBox just stops a genuinely long message from
+          // running off the sides, wrapping to a second line instead.
+          content: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: screenWidth * 0.82),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 11,
+                ),
+                decoration: BoxDecoration(
+                  color: isError
+                      ? const Color(0xE6B3261E)
+                      : const Color(0xE6323232),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w500,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -420,15 +480,11 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       _loadingLegAlternatives = true;
       _changingTime = false;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 4),
-        content: Text(
-          confirmed
-              ? 'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - confirmed against the real schedule.'
-              : 'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - could not confirm this route runs then, so the time is estimated.',
-        ),
-      ),
+    _showSnack(
+      confirmed
+          ? 'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - confirmed against the real schedule.'
+          : 'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - could not confirm this route runs then, so the time is estimated.',
+      duration: const Duration(seconds: 4),
     );
     // Which legs have a real alternative worth showing as editable can
     // itself depend on the time (a leg's own real alternatives are
@@ -442,11 +498,9 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       final nowSaved = await _controller.toggleSavedTrip(_asSavedTrip);
       if (!mounted) return;
       setState(() => _saved = nowSaved);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 1),
-          content: Text(nowSaved ? 'Trip saved' : 'Removed from saved list'),
-        ),
+      _showSnack(
+        nowSaved ? 'Trip saved' : 'Removed from saved list',
+        duration: const Duration(seconds: 1),
       );
     } catch (error) {
       // Surface the real reason (e.g. "permission-denied" from a missing
@@ -454,12 +508,10 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       // save silently doing nothing - that's what made "why isn't this
       // showing up in Firebase" hard to diagnose before.
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 4),
-          backgroundColor: Colors.red.shade700,
-          content: Text('Could not save trip: $error'),
-        ),
+      _showSnack(
+        'Could not save trip: $error',
+        isError: true,
+        duration: const Duration(seconds: 4),
       );
     }
   }
@@ -478,13 +530,9 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         _legAlternatives = {};
         _loadingLegAlternatives = true;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          duration: Duration(seconds: 3),
-          content: Text(
-            'Checking real alternatives for this trip\'s segments...',
-          ),
-        ),
+      _showSnack(
+        'Checking real alternatives for this trip\'s segments...',
+        duration: const Duration(seconds: 3),
       );
       await _loadLegAlternatives();
       return;
@@ -581,20 +629,13 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       await _controller.saveTrip(_asSavedTrip);
       if (!mounted) return;
       setState(() => _saved = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          duration: Duration(seconds: 1),
-          content: Text('Trip saved'),
-        ),
-      );
+      _showSnack('Trip saved', duration: const Duration(seconds: 1));
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 4),
-          backgroundColor: Colors.red.shade700,
-          content: Text('Could not save trip: $error'),
-        ),
+      _showSnack(
+        'Could not save trip: $error',
+        isError: true,
+        duration: const Duration(seconds: 4),
       );
     }
   }
@@ -675,18 +716,19 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
             allowTimeChange: widget.allowTimeChange,
             changingTime: _changingTime,
             onChangeTime: _changeDepartureTime,
-          ),
-          _BackButton(onPressed: () => Navigator.of(context).pop()),
-          _DetailsActions(
+            // Was a Positioned bar permanently pinned over the timeline
+            // (see _DetailsActions' old doc comment) - now just the last
+            // section of the same scrollable card, after the itinerary,
+            // so it scrolls away with the rest of the trip detail
+            // instead of always covering part of the screen.
             saved: _saved,
-            editing: _editing,
             checkingEditability: !_editing && _loadingLegAlternatives,
             canEdit: _editableLegIndices.isNotEmpty,
-            busy: _changingTime,
             onSave: _toggleSave,
             onEdit: _edit,
             onStartNavigation: _startNavigation,
           ),
+          _BackButton(onPressed: () => Navigator.of(context).pop()),
         ],
       ),
     );
@@ -835,6 +877,12 @@ class _TripContent extends StatelessWidget {
     this.allowTimeChange = false,
     this.changingTime = false,
     this.onChangeTime,
+    required this.saved,
+    required this.checkingEditability,
+    required this.canEdit,
+    required this.onSave,
+    required this.onEdit,
+    required this.onStartNavigation,
   });
 
   final LocationPoint from;
@@ -850,20 +898,51 @@ class _TripContent extends StatelessWidget {
   final bool changingTime;
   final VoidCallback? onChangeTime;
 
+  // Passed straight through to _DetailsActions below, now that it's
+  // rendered as the last section of this same scrollable card instead
+  // of a separate always-visible overlay - see that class's own doc
+  // comments for what each of these means.
+  final bool saved;
+  final bool checkingEditability;
+  final bool canEdit;
+  final VoidCallback onSave;
+  final VoidCallback onEdit;
+  final VoidCallback onStartNavigation;
+
   @override
   Widget build(BuildContext context) {
+    // Roughly one phone screen's worth, minus this scroll area's own
+    // top/bottom padding (the gap _DetailsBackground/_BackButton show
+    // through above, and the breathing room below) - so a short trip
+    // (few legs, no transfers) still fills about a full screen instead
+    // of the white card stopping right after a couple of rows with the
+    // 3 action buttons floating awkwardly close underneath. A longer
+    // itinerary is unaffected - it simply grows past this and scrolls,
+    // same as before.
+    final screenHeight = MediaQuery.of(context).size.height;
+    final cardMinHeight = (screenHeight - 170 - 24).clamp(0.0, double.infinity);
     return SafeArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(14, 170, 14, 150),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(10, 14, 10, 18),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: AppColors.border),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Column(
-            children: [
+        padding: const EdgeInsets.fromLTRB(14, 170, 14, 24),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: cardMinHeight),
+          // Lets the Column below resolve to a real, bounded height (its
+          // own natural content height, or [cardMinHeight] when that's
+          // taller - see BoxConstraints.tighten's own clamping) instead
+          // of the unbounded height SingleChildScrollView normally gives
+          // its child, which a bounded-height trick like Spacer/Expanded
+          // (used just below to push the buttons to the bottom of a
+          // short trip's card) requires to mean anything.
+          child: IntrinsicHeight(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(10, 14, 10, 18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: AppColors.border),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                children: [
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: InkWell(
@@ -934,7 +1013,26 @@ class _TripContent extends StatelessWidget {
                 arrivalTimeLabel: formatClockTime(option.arriveTime),
                 destinationLabel: to.name,
               ),
-            ],
+              const SizedBox(height: 22),
+              // Eats whatever's left of [cardMinHeight] on a short trip
+              // (0 on a trip already taller than that, per Spacer's own
+              // flex-vs-intrinsic behaviour) so these buttons land right
+              // at the bottom of the card either way, never floating
+              // right under a couple of timeline rows.
+              const Spacer(),
+              _DetailsActions(
+                saved: saved,
+                editing: editing,
+                checkingEditability: checkingEditability,
+                canEdit: canEdit,
+                busy: changingTime,
+                onSave: onSave,
+                onEdit: onEdit,
+                onStartNavigation: onStartNavigation,
+              ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -1008,93 +1106,70 @@ class _DetailsActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Anchored full-width with a solid background (rather than a floating,
-    // background-less bar) so the scrollable trip timeline behind it is
-    // fully hidden instead of showing through around/behind the buttons.
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
-      child: Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 16,
-              offset: Offset(0, -4),
+    // Plain inline section now (see _TripContent, which renders this
+    // right after the itinerary/DestinationRow) rather than a Positioned
+    // bar permanently pinned over the trip timeline - these buttons
+    // scroll away with the rest of the trip detail like everything else
+    // on the page instead of always covering part of the screen.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: 43,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.green,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(7),
+              ),
+            ),
+            onPressed: (editing || busy) ? null : onStartNavigation,
+            icon: const Icon(Icons.navigation_outlined, size: 19),
+            label: const Text(
+              'Start Navigation',
+              style: TextStyle(fontSize: 13),
+            ),
+          ),
+        ),
+        const SizedBox(height: 7),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: !busy && (editing || canEdit) ? onEdit : null,
+                icon: editing
+                    ? const Icon(Icons.check, size: 16)
+                    : checkingEditability
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.edit_outlined, size: 16),
+                label: Text(
+                  editing ? 'Done' : 'Edit',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: (editing || busy) ? null : onSave,
+                icon: Icon(
+                  saved ? Icons.favorite : Icons.favorite_border,
+                  size: 16,
+                ),
+                label: Text(
+                  saved ? 'Saved' : 'Save',
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
             ),
           ],
         ),
-        padding: const EdgeInsets.fromLTRB(24, 14, 24, 14),
-        child: SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: double.infinity,
-                height: 43,
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.green,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(7),
-                    ),
-                  ),
-                  onPressed: (editing || busy) ? null : onStartNavigation,
-                  icon: const Icon(Icons.navigation_outlined, size: 19),
-                  label: const Text(
-                    'Start Navigation',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 7),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: !busy && (editing || canEdit)
-                          ? onEdit
-                          : null,
-                      icon: editing
-                          ? const Icon(Icons.check, size: 16)
-                          : checkingEditability
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Icon(Icons.edit_outlined, size: 16),
-                      label: Text(
-                        editing ? 'Done' : 'Edit',
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: (editing || busy) ? null : onSave,
-                      icon: Icon(
-                        saved ? Icons.favorite : Icons.favorite_border,
-                        size: 16,
-                      ),
-                      label: Text(
-                        saved ? 'Saved' : 'Save',
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+      ],
     );
   }
 }
