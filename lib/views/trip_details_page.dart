@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 
 import '../controllers/transport_controller.dart';
@@ -125,8 +126,8 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   bool _saved = false;
   bool _editing = false;
 
-  // True while re-searching this exact from/to for a newly-picked
-  // departure time (see _changeDepartureTime) - only ever reachable when
+  // True while a re-plan for a newly-picked departure time is in
+  // flight (see _changeDepartureTime) - only ever reachable when
   // widget.allowTimeChange is true.
   bool _changingTime = false;
 
@@ -206,12 +207,39 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     }
   }
 
-  /// Re-plans this exact from/to for a newly-picked departure time and
-  /// swaps [_option] for the top result - only reachable when
-  /// widget.allowTimeChange is true (see SavedListPage._openTrip). Picks
-  /// the best-ranked option rather than trying to match the old route's
-  /// specific combination of services, the same way a fresh search
-  /// would - a bus that ran at 7:50pm may not even run at the new time.
+  /// Moves this exact trip to a newly-picked departure time - only
+  /// reachable when widget.allowTimeChange is true (see
+  /// SavedListPage._openTrip). Tries to keep BOTH things the person
+  /// wants at once: the exact same route (same bus/train, same
+  /// transfers, same fare) AND real, schedule-confirmed times for the
+  /// new date - not a fresh search that could come back with a
+  /// genuinely different combination of real alternatives (that's what
+  /// the per-leg Edit feature is for, for someone who explicitly wants
+  /// to swap something), and not an unverified guess either.
+  ///
+  /// Does this leg-by-leg rather than as one whole-trip search: an
+  /// earlier version searched fresh for the whole trip and looked for a
+  /// candidate riding the exact same combination of real services, but
+  /// HERE's own search only ever returns ITS best-ranked alternative(s)
+  /// for a from/to/time query - it doesn't answer "does this SPECIFIC
+  /// multi-transfer combination still exist", so a real 3-transfer
+  /// route (e.g. bus 104 -> bus 102 -> bus 303) routinely failed to
+  /// reappear as a whole even when every individual bus in it was still
+  /// genuinely running, which showed up as "could not confirm" far more
+  /// than it should have. Checking one real leg at a time against
+  /// [TransportController.findLegAlternatives] for that exact leg's own
+  /// start/end points - the same real per-leg lookup the pencil-icon
+  /// Edit feature already uses - confirms each bus/train individually
+  /// instead of guessing at the whole trip in one shot.
+  ///
+  /// Every real (non-walk) leg must confirm for the result to count as
+  /// schedule-confirmed; the moment any one of them can't be found
+  /// running near its own newly-shifted time, this gives up on
+  /// verification entirely and falls back to [withTimeShifted]'s plain,
+  /// unverified shift for the WHOLE trip - a partially-confirmed trip
+  /// (some legs real, one leg guessed) would be more confusing than
+  /// useful. Either way the person is told which one happened (see the
+  /// SnackBar below), never silently.
   Future<void> _changeDepartureTime() async {
     final current = _option.departTime;
     final date = await showDatePicker(
@@ -226,54 +254,187 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       context: context,
       initialTime: TimeOfDay.fromDateTime(current),
     );
-    if (time == null || !mounted) return;
+    if (!mounted) return;
+    // Backing out of the time step (tapping outside the dialog, the
+    // back button, "Cancel") used to discard the date just picked too -
+    // the whole change silently did nothing, which read as "I picked a
+    // new date and nothing happened". Falling back to the trip's
+    // original time-of-day instead means a date-only change (pick a
+    // date, then back out of the time step because the time is already
+    // right) actually takes effect.
+    final pickedTime = time ?? TimeOfDay.fromDateTime(current);
 
     final newDepartAt = DateTime(
       date.year,
       date.month,
       date.day,
-      time.hour,
-      time.minute,
+      pickedTime.hour,
+      pickedTime.minute,
     );
+    final delta = newDepartAt.difference(current);
+    if (delta == Duration.zero) return;
 
     setState(() => _changingTime = true);
+    var updated = withTimeShifted(_option, delta);
+    var confirmed = false;
     try {
-      final result = await _controller.searchRides(
-        from: widget.from,
-        to: widget.to,
-        departAt: newDepartAt,
-      );
-      if (!mounted) return;
-      if (result.options.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('No route found for that time. Try another time.'),
-          ),
-        );
-        return;
+      final legs = _option.legs;
+      final realLegIndices = [
+        for (var i = 0; i < legs.length; i++)
+          if (realLegLabel(legs[i]) != null) i,
+      ];
+
+      if (realLegIndices.isNotEmpty) {
+        final replacements = <int, RideOption>{};
+        // How far this leg's OWN real confirmed timing has drifted from
+        // the naive uniform shift so far - starts at the plain picked
+        // delta (nothing confirmed yet), then gets corrected leg by leg
+        // as each one's real schedule turns out a little different from
+        // that guess, so a later leg is probed near where the trip
+        // would ACTUALLY be by then, not blindly at delta - see
+        // withLegsReplaced's own doc comment for the same idea applied
+        // to the rebuilt itinerary.
+        var carryDelta = delta;
+        var allConfirmed = true;
+
+        for (final legIndex in realLegIndices) {
+          final leg = legs[legIndex];
+          final wantedLabel = realLegLabel(leg);
+          final legFrom = leg.startPoint;
+          final legTo = leg.endPoint;
+          if (wantedLabel == null || legFrom == null || legTo == null) {
+            allConfirmed = false;
+            break;
+          }
+
+          final baseProbeAt = leg.start.add(carryDelta);
+          RideOption? matched;
+          // Same "don't insist on the exact minute" reasoning the
+          // original whole-trip probing used - a real bus a little
+          // later than the naive guess is still a genuine,
+          // schedule-confirmed answer for this leg.
+          for (final probeAt in [
+            baseProbeAt,
+            baseProbeAt.add(const Duration(minutes: 30)),
+            baseProbeAt.add(const Duration(hours: 1)),
+            baseProbeAt.add(const Duration(hours: 2)),
+          ]) {
+            final candidates = await _controller.findLegAlternatives(
+              from: legFrom,
+              to: legTo,
+              departAt: probeAt,
+            );
+            for (final candidate in candidates) {
+              final labels = hopRouteLabels(candidate);
+              if (labels.length != 1 || labels.first != wantedLabel) {
+                continue;
+              }
+              // The one leg inside `candidate` that actually carries
+              // `wantedLabel` - usually the whole thing for a direct
+              // hop, but it can be sandwiched between short
+              // access/egress walk legs HERE added to reach the stop.
+              TripLeg? realLeg;
+              for (final candidateLeg in candidate.legs) {
+                if (realLegLabel(candidateLeg) == wantedLabel) {
+                  realLeg = candidateLeg;
+                  break;
+                }
+              }
+              if (realLeg == null) continue;
+              // Riding the same numbered service isn't enough on its
+              // own - HERE's "alternatives" for one leg's start/end
+              // aren't all clustered near the requested time (a service
+              // that only runs a couple of times a day can still show
+              // up as "an alternative", just many hours away), and
+              // accepting one of those would "confirm" a route that
+              // isn't actually the one running anywhere near the picked
+              // time - exactly the impossible-looking jump from, say,
+              // 7am to 11pm this check used to let through.
+              //
+              // This has to be a one-sided window, not just "close to
+              // probeAt": [probeAt] IS this leg's own real, just-
+              // confirmed arrival point from the PREVIOUS leg (see
+              // carryDelta below - a genuinely sequential "search from
+              // where the last leg actually leaves you off" chain, the
+              // same way a person checks a real timetable leg by leg).
+              // A same-numbered service that departs even a minute
+              // BEFORE that is a bus this itinerary could never actually
+              // catch - accepting it produced exactly the
+              // impossible-to-board connection (a leg "departing" a few
+              // minutes before the previous one even arrives) that
+              // showed up after the first drift check went in. Only a
+              // small grace period allows for a same-minute boarding;
+              // arriving late is fine up to a real, reasonable wait.
+              if (realLeg.start.isBefore(
+                probeAt.subtract(const Duration(minutes: 1)),
+              )) {
+                continue;
+              }
+              if (realLeg.start.isAfter(
+                probeAt.add(const Duration(minutes: 60)),
+              )) {
+                continue;
+              }
+              matched = candidate;
+              break;
+            }
+            if (matched != null) break;
+          }
+
+          if (matched == null) {
+            allConfirmed = false;
+            break;
+          }
+          replacements[legIndex] = matched;
+          final matchedLegs = matched.legs;
+          if (matchedLegs.isNotEmpty) {
+            carryDelta = matchedLegs.last.end.difference(leg.end);
+          }
+        }
+
+        if (allConfirmed && replacements.isNotEmpty) {
+          updated = withLegsReplaced(
+            _option,
+            replacements: replacements,
+            from: widget.from,
+            initialDelta: delta,
+          );
+          confirmed = true;
+        }
       }
-      setState(() {
-        _option = result.options.first;
-        // A different departure time means a different RideOption.id
-        // (see SavedTrip.id), so whatever saved status applied before
-        // no longer means anything for it - same convention as _editLeg.
-        _saved = false;
-        _legAlternatives = {};
-        _loadingLegAlternatives = true;
-      });
-      await _loadLegAlternatives();
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 4),
-          backgroundColor: Colors.red.shade700,
-          content: Text('Could not re-plan trip: $error'),
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _changingTime = false);
+      // A failed re-verification shouldn't leave the trip stuck on the
+      // old date - `updated` already holds the plain shifted fallback
+      // from above, so this just means staying with that.
+      debugPrint('[TripDetailsPage] schedule re-check failed: $error');
     }
+    if (!mounted) return;
+
+    setState(() {
+      _option = updated;
+      // A different departure time means a different RideOption.id (see
+      // SavedTrip.id), so whatever saved status applied before no
+      // longer means anything for it - same convention as _editLeg.
+      _saved = false;
+      _legAlternatives = {};
+      _loadingLegAlternatives = true;
+      _changingTime = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 4),
+        content: Text(
+          confirmed
+              ? 'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - confirmed against the real schedule.'
+              : 'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - could not confirm this route runs then, so the time is estimated.',
+        ),
+      ),
+    );
+    // Which legs have a real alternative worth showing as editable can
+    // itself depend on the time (a leg's own real alternatives are
+    // searched around its own start time) - re-checked for the new
+    // times, same as after any other edit (see _editLeg).
+    await _loadLegAlternatives();
   }
 
   Future<void> _toggleSave() async {

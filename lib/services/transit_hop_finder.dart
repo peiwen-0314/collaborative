@@ -233,21 +233,36 @@ String _asTransferSubtitle(String subtitle) {
   return subtitle.startsWith('⇄') ? '⇄  Transfer' : subtitle;
 }
 
+/// The one real service/route label [leg] itself rides (e.g. "104"),
+/// or null when it has none of its own to match on - a walk/transfer
+/// leg, or a leg HERE (or the offline/mock generator) couldn't give a
+/// more specific name than its own generic mode label. The single-leg
+/// building block [hopRouteLabels] applies across a whole hop's legs;
+/// TripDetailsPage's per-leg schedule re-check (_changeDepartureTime)
+/// uses it directly to check one real leg at a time against a fresh
+/// [TransportController.findLegAlternatives] result for that exact
+/// stretch, rather than trying to match a whole multi-transfer trip as
+/// one unit (see withLegsReplaced's doc comment for why that whole-trip
+/// matching turned out to be unreliable).
+String? realLegLabel(TripLeg leg) {
+  if (leg.isTransfer || leg.mode == TransportMode.walk) return null;
+  final label = leg.title.trim();
+  if (label.isEmpty || label == leg.mode.label) return null;
+  return label;
+}
+
 /// The real route/service numbers a hop actually rides (e.g. ["104"]),
-/// skipping walk/transfer legs and any leg HERE couldn't give a more
-/// specific name than its generic mode label - same extraction
-/// [RideOption.routeSummary] uses, exposed here so callers that splice a
-/// hop into a combined itinerary (OsmBikeShareService._composeOption,
+/// in leg order - just [realLegLabel] applied leg-by-leg and
+/// de-duplicated, exposed here so callers that splice a hop into a
+/// combined itinerary (OsmBikeShareService._composeOption,
 /// TransportService._withAccessAlternatives) can group these into one
 /// "Bus (104 + 11)"-style title segment instead of a separate "Bus"
 /// word per hop, which used to read as "Bus + Shared Bike + Bus".
 List<String> hopRouteLabels(RideOption hop) {
   final labels = <String>[];
   for (final leg in hop.legs) {
-    if (leg.isTransfer || leg.mode == TransportMode.walk) continue;
-    final label = leg.title.trim();
-    if (label.isEmpty || label == leg.mode.label) continue;
-    if (!labels.contains(label)) labels.add(label);
+    final label = realLegLabel(leg);
+    if (label != null && !labels.contains(label)) labels.add(label);
   }
   return labels;
 }
@@ -269,6 +284,54 @@ List<String> hopRouteLabels(RideOption hop) {
 /// a slower replacement pushes the rest of the trip later, a faster one
 /// pulls it earlier, exactly like swapping one leg of a real journey
 /// planner's itinerary would.
+/// Moves [option]'s whole itinerary to a new departure time WITHOUT
+/// re-searching - every leg keeps its real mode/title/subtitle/distance
+/// (see TripLeg.distanceKm), just shifted by [delta], and cost/CO2/tags
+/// carry over unchanged too. Used by TripDetailsPage._changeDepartureTime
+/// for a Saved List trip: the point of "change the time" there is
+/// re-dating the exact same day-to-day commute, not risking a fresh
+/// search coming back with a genuinely different combination of real
+/// alternatives for the new date/time (which withLegReplaced-style
+/// editing already covers on purpose, for a person who explicitly wants
+/// to swap one leg). The tradeoff: unlike every other time shown in this
+/// app, the shifted times are NOT re-confirmed against a real schedule
+/// for the new date - see the "Live" tag TripDetailsPage's header
+/// already shows to mean "these times came from a real search", which a
+/// shifted option keeps carrying even though this particular result
+/// didn't just come from one.
+RideOption withTimeShifted(RideOption option, Duration delta) {
+  if (delta == Duration.zero) return option;
+  final shiftedLegs = option.legs
+      .map(
+        (leg) => TripLeg(
+          mode: leg.mode,
+          title: leg.title,
+          subtitle: leg.subtitle,
+          start: leg.start.add(delta),
+          end: leg.end.add(delta),
+          isTransfer: leg.isTransfer,
+          distanceKm: leg.distanceKm,
+          startPoint: leg.startPoint,
+          endPoint: leg.endPoint,
+        ),
+      )
+      .toList();
+  final id = '${option.id}-shifted-${option.departTime.add(delta).millisecondsSinceEpoch}'
+      .hashCode
+      .toString();
+  return RideOption(
+    id: id,
+    title: option.title,
+    legs: shiftedLegs,
+    estCostRm: option.estCostRm,
+    co2Kg: option.co2Kg,
+    tags: option.tags,
+    isLiveData: option.isLiveData,
+    searchDepartAt: option.searchDepartAt.add(delta),
+    path: option.path,
+  );
+}
+
 RideOption withLegReplaced(
   RideOption option, {
   required int legIndex,
@@ -358,6 +421,135 @@ RideOption withLegReplaced(
     tags: option.tags.contains('Edited')
         ? option.tags
         : [...option.tags, 'Edited'],
+    path: option.path,
+  );
+}
+
+/// Rebuilds [option] with every leg index in [replacements] swapped for
+/// its own real replacement, all in one pass - the per-leg counterpart
+/// to [withLegReplaced] (which only ever swaps ONE leg, leaving
+/// everything before it untouched on purpose - that's right for a
+/// person manually editing a single leg, but wrong for re-dating a
+/// whole trip). Used by TripDetailsPage._changeDepartureTime after it
+/// has independently confirmed a real, schedule-matching replacement
+/// for each of [option]'s own real (non-walk) legs at the newly-picked
+/// date/time - see that method for why this replaced a single
+/// whole-trip search-and-match (that approach - findMatchingRoute
+/// comparing candidates from a fresh search - could reliably reproduce
+/// a SIMPLE trip, but a multi-transfer trip's exact combination of
+/// buses is rarely what HERE's own best-ranked results for a fresh
+/// query happen to return, even when every individual bus in it is
+/// still genuinely running).
+///
+/// [initialDelta] shifts every leg from the very start (including any
+/// leg before the first replacement, and any leg that has no
+/// replacement at all, e.g. a walk/transfer) - the naive "just move the
+/// whole trip by this much" guess ([withTimeShifted]'s own approach).
+/// From each replacement onward, the shift actually carried forward is
+/// corrected to that replacement's own real confirmed end time instead
+/// of the naive guess, so a later leg is anchored to what really
+/// happens, not to an assumption - the same cascading-anchor idea
+/// [withLegReplaced] already uses for the legs after its one edit, just
+/// carried through every replacement in sequence here. Defaults to
+/// [Duration.zero] (nothing shifts except each replacement's own
+/// spliced-in legs), which happens to make this behave the same as
+/// calling [withLegReplaced] once per entry in [replacements] - but
+/// [withLegReplaced] itself is left untouched rather than rewritten in
+/// terms of this, since it's already relied on elsewhere
+/// (TransportController.swapRainyBikeLeg, TripDetailsPage._editLeg) and
+/// there's no reason to risk it.
+RideOption withLegsReplaced(
+  RideOption option, {
+  required Map<int, RideOption> replacements,
+  required LocationPoint from,
+  Duration initialDelta = Duration.zero,
+}) {
+  if (replacements.isEmpty) {
+    return initialDelta == Duration.zero
+        ? option
+        : withTimeShifted(option, initialDelta);
+  }
+
+  final legs = option.legs;
+  final newLegs = <TripLeg>[];
+  var carryDelta = initialDelta;
+
+  for (var i = 0; i < legs.length; i++) {
+    final originalLeg = legs[i];
+    final replacement = replacements[i];
+
+    if (replacement == null) {
+      newLegs.add(
+        carryDelta == Duration.zero
+            ? originalLeg
+            : TripLeg(
+                mode: originalLeg.mode,
+                title: originalLeg.title,
+                subtitle: originalLeg.subtitle,
+                start: originalLeg.start.add(carryDelta),
+                end: originalLeg.end.add(carryDelta),
+                isTransfer: originalLeg.isTransfer,
+                distanceKm: originalLeg.distanceKm,
+                startPoint: originalLeg.startPoint,
+                endPoint: originalLeg.endPoint,
+              ),
+      );
+      continue;
+    }
+
+    final isFirstOverall = i == 0;
+    final isLastOverall = i == legs.length - 1;
+
+    // Same boundary-restyling as withLegReplaced - a replacement's own
+    // walk boundary only reads as a genuine start/end-of-trip "Walk"
+    // when it's actually replacing the very first or very last leg of
+    // the whole itinerary.
+    var replacementLegs = replacement.legs;
+    if (!isLastOverall) replacementLegs = asLeadingSegment(replacementLegs);
+    if (!isFirstOverall) replacementLegs = asTrailingSegment(replacementLegs);
+
+    // NOT shifted by carryDelta - unlike an untouched original leg
+    // (which is still carrying its OLD, pre-edit absolute time and
+    // genuinely needs the naive shift applied), [replacement] is
+    // already a real search result fetched at the correct probed time
+    // for this exact leg (see TripDetailsPage._changeDepartureTime,
+    // which anchors each leg's own probe time using this same
+    // cascading carryDelta before ever calling findLegAlternatives).
+    // Shifting it again here would double-apply that offset, landing
+    // this leg on a real bus/train's real timetable entry that has
+    // nothing to do with the trip's other legs - exactly the
+    // impossible-looking jump backwards/forwards in time this whole
+    // per-leg approach exists to avoid.
+    newLegs.addAll(replacementLegs);
+
+    // From here on, carry forward however much THIS replacement's own
+    // real end time differs from where the naive shift-so-far would
+    // have placed the original leg's end - see the doc comment above.
+    final originalEndAfterCarry = originalLeg.end.add(carryDelta);
+    final newEnd = replacementLegs.isEmpty
+        ? originalEndAfterCarry
+        : replacementLegs.last.end;
+    carryDelta = carryDelta + newEnd.difference(originalEndAfterCarry);
+  }
+
+  final mergedLegs = mergeAdjacentWalkLegs(newLegs);
+  final newCost = sumRealLegFares(mergedLegs, from);
+  final newCo2 = sumLegsCo2Kg(mergedLegs);
+
+  final replacedIds = replacements.entries
+      .map((entry) => '${entry.key}:${entry.value.id}')
+      .join(',');
+  final id = '${option.id}-redated-$replacedIds'.hashCode.toString();
+
+  return RideOption(
+    id: id,
+    title: option.title,
+    legs: mergedLegs,
+    estCostRm: newCost,
+    co2Kg: newCo2,
+    isLiveData: true,
+    searchDepartAt: option.searchDepartAt.add(carryDelta),
+    tags: option.tags,
     path: option.path,
   );
 }

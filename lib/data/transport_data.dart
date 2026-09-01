@@ -526,6 +526,24 @@ double sumRealLegFares(List<TripLeg> legs, LocationPoint from) {
   return total;
 }
 
+/// The accurate total CO2 for [legs] - every leg's own emission
+/// contribution ((kCo2PerKmByMode[mode] ?? 0.05) * distanceKm) summed
+/// fresh, the same formula HereTransitService._parseRoute and the
+/// offline/mock generator both already use per-leg while building a
+/// [RideOption] in the first place (unlike [sumRealLegFares], WALK legs
+/// are included here too - a walk's own rate is 0.0 either way, but a
+/// leg with no known [TripLeg.distanceKm] still contributes nothing,
+/// matching how the total was originally built up leg-by-leg).
+double sumLegsCo2Kg(List<TripLeg> legs) {
+  var total = 0.0;
+  for (final leg in legs) {
+    final km = leg.distanceKm;
+    if (km == null) continue;
+    total += (kCo2PerKmByMode[leg.mode] ?? 0.05) * km;
+  }
+  return total;
+}
+
 /// The cost to actually SHOW for [option] - a fresh, accurate recompute
 /// (see [sumRealLegFares]) whenever at least one of its legs has a real
 /// fare to recompute from, falling back to [RideOption.estCostRm]
