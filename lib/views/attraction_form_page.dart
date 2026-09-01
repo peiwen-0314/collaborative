@@ -7,6 +7,7 @@ import '../controllers/attraction_controller.dart';
 import '../models/attraction.dart';
 import '../models/category.dart';
 import 'admin_sidebar.dart';
+import 'admin_heritage_management_page.dart';
 
 class AttractionFormPage extends StatefulWidget {
   final AttractionModel? attraction;
@@ -198,6 +199,15 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
                 Navigator.popUntil(context, (route) => route.isFirst),
             onAttractionTap: () => Navigator.pop(context),
             onCategoryTap: () {},
+            onCulturalHeritageTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                  const AdminCulturalHeritageManagementPage(),
+                ),
+              );
+            },
             onStampTap: () {},
             onReportTap: () {},
             onLogoutTap: () =>

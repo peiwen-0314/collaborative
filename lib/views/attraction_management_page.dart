@@ -4,6 +4,7 @@ import '../controllers/attraction_controller.dart';
 import '../models/attraction.dart';
 import 'add_attraction_page.dart';
 import 'admin_sidebar.dart';
+import 'admin_heritage_management_page.dart';
 import 'category_management_page.dart';
 import 'edit_attraction_page.dart';
 
@@ -90,6 +91,16 @@ class _AttractionManagementPageState
                 MaterialPageRoute(
                   builder: (context) =>
                   const CategoryManagementPage(),
+                ),
+              );
+            },
+
+            onCulturalHeritageTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                  const AdminCulturalHeritageManagementPage(),
                 ),
               );
             },

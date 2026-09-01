@@ -226,7 +226,7 @@ class AdminHomePage extends StatelessWidget {
                             title:
                                 'Cultural & Heritage Management',
                             description:
-                                'Manage heritage places, historical information and cultural content.',
+                                'Manage heritage information.',
                             onTap: () {
                               Navigator.push(
                                 context,
@@ -287,7 +287,7 @@ class AdminHomePage extends StatelessWidget {
   }) {
     return SizedBox(
       width: 280,
-      height: 170,
+      height: 185,
 
       child: Material(
         color: Colors.white,

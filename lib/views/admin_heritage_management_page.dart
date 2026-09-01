@@ -1,3 +1,5 @@
+import 'package:collaborative_asg/views/attraction_management_page.dart';
+import 'package:collaborative_asg/views/category_management_page.dart';
 import 'package:flutter/material.dart';
 
 import '../services/admin_heritage_service.dart';
@@ -40,12 +42,20 @@ class _AdminCulturalHeritageManagementPageState
     Navigator.pop(context);
   }
 
-  void _showAttractionSeparateMessage() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Attraction Management is a separate module.',
-        ),
+  void _openAttractionManagement() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const AttractionManagementPage(),
+      ),
+    );
+  }
+
+  void _openCategoryManagement() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const CategoryManagementPage(),
       ),
     );
   }
@@ -182,11 +192,19 @@ class _AdminCulturalHeritageManagementPageState
       body: Row(
         children: [
           AdminSidebar(
-            selected: 'culturalHeritage',
+            selectedPage: 'culturalHeritage',
             onDashboardTap: _goDashboard,
-            onAttractionTap:
-            _showAttractionSeparateMessage,
-            onCulturalHeritageTap: () {},
+            onAttractionTap: _openAttractionManagement,
+            onCategoryTap: _openCategoryManagement,
+            onCulturalHeritageTap: () {
+              // Already on Cultural & Heritage Management.
+            },
+            onStampTap: () {
+              // Later add navigation.
+            },
+            onReportTap: () {
+              // Later add navigation.
+            },
             onLogoutTap: _logout,
           ),
 

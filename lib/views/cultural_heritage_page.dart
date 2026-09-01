@@ -7,6 +7,7 @@ import '../services/heritage_nearby_service.dart';
 import '../widgets/heritage_image.dart';
 import 'ai_attraction_recognition_page.dart';
 import 'heritage_detail_page.dart';
+import 'heritage_diary_page.dart';
 
 class CulturalHeritagePage extends StatefulWidget {
   const CulturalHeritagePage({super.key});
@@ -598,6 +599,39 @@ class _CulturalHeritagePageState extends State<CulturalHeritagePage> {
             ),
           ),
 
+          // =========================================================
+          // TRAVEL DIARY
+          // =========================================================
+          Material(
+            color: paleGreen,
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const HeritageDiaryPage(),
+                  ),
+                );
+              },
+              child: const SizedBox(
+                width: 48,
+                height: 48,
+                child: Icon(
+                  Icons.auto_stories_outlined,
+                  color: green,
+                  size: 24,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 8),
+
+          // =========================================================
+          // AI CAMERA RECOGNITION
+          // =========================================================
           Material(
             color: paleGreen,
             shape: const CircleBorder(),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../controllers/category_controller.dart';
 import '../models/category.dart';
 import 'admin_sidebar.dart';
+import 'admin_heritage_management_page.dart';
 import 'attraction_management_page.dart';
 
 class CategoryManagementPage
@@ -104,10 +105,15 @@ class _CategoryManagementPageState
             },
 
             onCategoryTap: () {
+              // Already on Category Management.
+            },
+
+            onCulturalHeritageTap: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const CategoryManagementPage(),
+                  builder: (context) =>
+                  const AdminCulturalHeritageManagementPage(),
                 ),
               );
             },
