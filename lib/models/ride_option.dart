@@ -1,8 +1,9 @@
 import '../models/location_point.dart';
+import 'transport_mode.dart';
 import 'trip_leg.dart';
 
 /// One selectable route between the current From/To search, e.g.
-/// "MRT + Walk" or "KTM Komuter + Express Bus + Ferry".
+/// "MRT + Walk" or "Train + Bus + Ferry".
 class RideOption {
   const RideOption({
     required this.id,
@@ -75,7 +76,56 @@ class RideOption {
   /// competitive with an option you could start on right now.
   Duration get totalElapsedFromSearch => arriveTime.difference(searchDepartAt);
 
-  int get transferCount => legs.where((leg) => leg.isTransfer).length;
+  /// How many times this option's rider actually changes vehicles.
+  ///
+  /// Not simply `legs.where((leg) => leg.isTransfer).length`: that flag
+  /// also covers filler "Wait for ..." segments inserted before *each*
+  /// real leg (including the very first one - see
+  /// MockTransportRepository/HereTransitService), so counting it
+  /// directly conflates "waiting for a bus" with "changing buses", and
+  /// can even miss a real transfer entirely when the provider didn't
+  /// return a walking/interchange leg between two consecutive vehicles
+  /// (e.g. a same-stop change - see TripDetailsPage's itinerary, which
+  /// shows a synthetic "Change here" marker in that case). This instead
+  /// counts the real (non-walk) transit legs and subtracts one: two bus
+  /// legs joined by one change of vehicle correctly reads as 1, a
+  /// single direct leg as 0.
+  int get transferCount {
+    final transitLegCount = legs
+        .where((leg) => !leg.isTransfer && leg.mode != TransportMode.walk)
+        .length;
+    return transitLegCount > 0 ? transitLegCount - 1 : 0;
+  }
+
+  /// A concrete label for the results list card - keeps [title]'s
+  /// generic mode grouping ("Bus", "Bus + Train") exactly as-is, but
+  /// appends the real route/service number of each vehicle actually
+  /// ridden in parentheses, e.g. "Bus (104 + 101)" - so near-identical
+  /// "Bus" options (which used to be indistinguishable on the results
+  /// list) are still told apart, without losing the familiar mode word.
+  /// Only live options have a real service name per leg (see
+  /// HereTransitService._parseRoute's `serviceName`) - the offline/mock
+  /// generator has no real bus/train numbers to show, so this falls
+  /// back to plain [title] for those, and for any live leg HERE itself
+  /// couldn't give a more specific name than the generic mode label.
+  String get routeSummary {
+    if (!isLiveData) return title;
+    final realLabels = <String>[];
+    for (final leg in legs) {
+      if (leg.isTransfer || leg.mode == TransportMode.walk) continue;
+      final label = leg.title.trim();
+      if (label.isEmpty || label == leg.mode.label) continue;
+      // Some titles already spell out their real numbers themselves
+      // (e.g. OsmBikeShareService/TransportService building "Bus (104 +
+      // 11) + Shared Bike" directly) - appending them again here would
+      // just repeat "(104)" a second time.
+      if (title.contains(label)) continue;
+      if (realLabels.isEmpty || realLabels.last != label) {
+        realLabels.add(label);
+      }
+    }
+    return realLabels.isEmpty ? title : '$title (${realLabels.join(' + ')})';
+  }
 
   String get co2Level {
     if (co2Kg <= 0.2) return 'Very Low';

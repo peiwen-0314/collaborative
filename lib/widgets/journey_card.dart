@@ -180,7 +180,13 @@ class _JourneyCardState extends State<JourneyCard> {
 
   Future<void> _runSearch(String query) async {
     final requestId = ++_requestId;
-    final results = await _locationService.searchPlaces(query);
+    // Rank POIs around the trip origin/current location, like a maps search
+    // box, instead of returning equally named malls or restaurants in an
+    // arbitrary nationwide order.
+    final results = await _locationService.searchPlaces(
+      query,
+      bias: widget.from,
+    );
     if (!mounted || requestId != _requestId) return;
     setState(() {
       _suggestions = results;
@@ -443,7 +449,11 @@ class _SuggestionsPanel extends StatelessWidget {
         borderRadius: BorderRadius.circular(13),
         border: Border.all(color: AppColors.border),
         boxShadow: const [
-          BoxShadow(color: Colors.black26, blurRadius: 14, offset: Offset(0, 6)),
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 14,
+            offset: Offset(0, 6),
+          ),
         ],
       ),
       child: _buildContent(),
@@ -467,7 +477,10 @@ class _SuggestionsPanel extends StatelessWidget {
           child: SizedBox(
             width: 18,
             height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2.2, color: AppColors.green),
+            child: CircularProgressIndicator(
+              strokeWidth: 2.2,
+              color: AppColors.green,
+            ),
           ),
         ),
       );
@@ -513,17 +526,28 @@ class _SuggestionTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.location_on_outlined, color: AppColors.green, size: 18),
+            const Icon(
+              Icons.location_on_outlined,
+              color: AppColors.green,
+              size: 18,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 place.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.muted, size: 20),
+            const Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.muted,
+              size: 20,
+            ),
           ],
         ),
       ),

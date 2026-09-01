@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/app_assets.dart';
 import '../core/app_theme.dart';
 import '../core/formatters.dart';
+import '../data/transport_data.dart';
 import '../models/ride_option.dart';
 import '../models/transport_mode.dart';
 
@@ -76,23 +77,26 @@ class _RideInformation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shownTags = option.tags.take(3).toList();
+    final transferChip = transferCountLabel(option.transferCount);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          option.title,
+          option.routeSummary,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
-        if (shownTags.isNotEmpty) ...[
-          const SizedBox(height: 7),
-          Wrap(
-            spacing: 4,
-            runSpacing: 3,
-            children: [for (final tag in shownTags) MiniChip(tag)],
-          ),
-        ],
+        const SizedBox(height: 7),
+        Wrap(
+          spacing: 4,
+          runSpacing: 3,
+          children: [
+            MiniChip(transferChip),
+            for (final tag in shownTags)
+              MiniChip(tag, warning: tag == kRainBikeTag),
+          ],
+        ),
         const SizedBox(height: 6),
         Row(
           children: [
@@ -182,22 +186,35 @@ class _ArrivalInformation extends StatelessWidget {
 }
 
 class MiniChip extends StatelessWidget {
-  const MiniChip(this.label, {super.key});
+  const MiniChip(this.label, {super.key, this.warning = false});
 
   final String label;
+
+  /// True for a chip that should stand out as a caution rather than
+  /// blend in as a neutral fact (right now, only [kRainBikeTag]) -
+  /// styled orange instead of the usual neutral grey so a rainy-day
+  /// "don't ideally bike this" warning doesn't read as just another
+  /// badge like "Low Carbon" or "Real Bike Station".
+  final bool warning;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
       decoration: BoxDecoration(
-        color: AppColors.chip,
-        border: Border.all(color: AppColors.border),
+        color: warning ? const Color(0xFFFFF1E0) : AppColors.chip,
+        border: Border.all(
+          color: warning ? AppColors.orange : AppColors.border,
+        ),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
         label,
-        style: const TextStyle(fontSize: 7, color: AppColors.muted),
+        style: TextStyle(
+          fontSize: 7,
+          color: warning ? AppColors.orange : AppColors.muted,
+          fontWeight: warning ? FontWeight.w700 : FontWeight.normal,
+        ),
       ),
     );
   }

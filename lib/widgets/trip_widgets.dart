@@ -2,13 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../core/app_theme.dart';
 import '../core/formatters.dart';
+import '../data/transport_data.dart';
+import '../models/location_point.dart';
 import '../models/ride_option.dart';
 import '../models/transport_mode.dart';
 
 class TripSummary extends StatelessWidget {
-  const TripSummary({super.key, required this.option});
+  const TripSummary({super.key, required this.option, required this.from});
 
   final RideOption option;
+
+  /// Only used to pick the Penang-vs-Klang-Valley fare tables for
+  /// [displayCostRm] - see that function's doc comment.
+  final LocationPoint from;
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +44,7 @@ class TripSummary extends StatelessWidget {
           Expanded(
             child: SummaryCell(
               icon: Icons.swap_horiz,
-              label: transfers == 1 ? '1 Transfer' : '$transfers Transfers',
+              label: transferCountLabel(transfers),
               value: '',
             ),
           ),
@@ -46,7 +52,7 @@ class TripSummary extends StatelessWidget {
             child: SummaryCell(
               icon: Icons.monetization_on_outlined,
               label: 'Est. Cost',
-              value: formatRm(option.estCostRm),
+              value: formatRm(displayCostRm(option, from)),
             ),
           ),
           Expanded(
@@ -115,8 +121,10 @@ class TimelineItem extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.duration,
+    this.fareLabel,
     this.mode,
     this.transfer = false,
+    this.onTap,
   });
 
   final String start;
@@ -125,14 +133,28 @@ class TimelineItem extends StatelessWidget {
   final String subtitle;
   final String duration;
 
+  /// This leg's own real fare (e.g. "RM 1.50"), when known - see
+  /// TripDetailsPage's _timelineItems/fareLabel. Null for a walk or
+  /// transfer leg (free/not its own fare), or when the underlying leg
+  /// has no real distance to price (the offline/mock generator).
+  final String? fareLabel;
+
   /// Transport mode for this leg's icon bubble. Left `null` for transfer
   /// legs, which show no icon (matching the original design).
   final TransportMode? mode;
   final bool transfer;
 
+  /// Set only for a real, editable leg while TripDetailsPage is in Edit
+  /// mode (see its onLegTap) - shows a small pencil hint and makes the
+  /// whole row tappable to open the "choose a real alternative for this
+  /// segment" sheet. Left null for every other row (view mode, or a row
+  /// that isn't a real editable leg, like the synthetic "Change here"
+  /// marker), which renders exactly as before with no tap affordance.
+  final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    final row = SizedBox(
       height: transfer ? 55 : 62,
       child: Row(
         children: [
@@ -166,11 +188,20 @@ class TimelineItem extends StatelessWidget {
               title: title,
               subtitle: subtitle,
               duration: duration,
+              fareLabel: fareLabel,
               transfer: transfer,
+              editable: onTap != null,
             ),
           ),
         ],
       ),
+    );
+
+    if (onTap == null) return row;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(5),
+      child: row,
     );
   }
 }
@@ -212,13 +243,22 @@ class _TimelineCard extends StatelessWidget {
     required this.subtitle,
     required this.duration,
     required this.transfer,
+    this.fareLabel,
+    this.editable = false,
   });
 
   final TransportMode? mode;
   final String title;
   final String subtitle;
   final String duration;
+  final String? fareLabel;
   final bool transfer;
+
+  /// True while this row is tappable in TripDetailsPage's Edit mode -
+  /// shows a small pencil hint next to the duration chip so it's
+  /// visually obvious which rows can be swapped for a real alternative,
+  /// as opposed to every other row that just looks the same as always.
+  final bool editable;
 
   @override
   Widget build(BuildContext context) {
@@ -268,17 +308,41 @@ class _TimelineCard extends StatelessWidget {
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.lightGreen,
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: Text(
-              duration,
-              style: const TextStyle(fontSize: 9, color: AppColors.muted),
-            ),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.lightGreen,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text(
+                  duration,
+                  style: const TextStyle(fontSize: 9, color: AppColors.muted),
+                ),
+              ),
+              if (fareLabel != null) ...[
+                const SizedBox(height: 3),
+                Text(
+                  fareLabel!,
+                  style: const TextStyle(
+                    fontSize: 9,
+                    color: AppColors.green,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
           ),
+          if (editable) ...[
+            const SizedBox(width: 6),
+            const Icon(Icons.edit, size: 14, color: AppColors.green),
+          ],
         ],
       ),
     );

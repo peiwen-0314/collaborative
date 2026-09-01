@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
+import '../core/api_config.dart';
 import '../models/location_point.dart';
 
 enum LocationLookupStatus { success, serviceDisabled, permissionDenied, error }
@@ -24,6 +25,7 @@ class LocationService {
 
   Future<LocationLookupResult> detectCurrentLocation() async {
     try {
+      await ApiConfig.ensureLoaded();
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         return const LocationLookupResult(
@@ -42,30 +44,14 @@ class LocationService {
         );
       }
 
-      // Without a time limit, this can hang for a very long time (or
-      // effectively forever) on a device/emulator that can't get a quick
-      // GPS/network fix - a common case on Android emulators with no
-      // location signal configured. Bounding it means a slow/unavailable
-      // fix fails fast into the existing catch-all below (which already
-      // falls back to "couldn't detect location" and leaves From blank),
-      // instead of leaving the user staring at a loading state with no
-      // idea whether it's still working.
-      //
-      // accuracy is deliberately `low`, not `medium`/`high`: on Flutter
-      // web specifically (geolocator's web implementation maps anything
-      // above `low` to the browser's `enableHighAccuracy: true`), asking
-      // for better-than-low accuracy on a desktop browser with no real GPS
-      // chip makes Chrome try much harder for a precise fix - which is
-      // often exactly what was making this feel "stuck": it would
-      // regularly burn the *entire* timeout before giving up, every single
-      // search. `low` accepts a fast, coarse Wi-Fi/IP-based fix instead -
-      // still plenty precise for "which city/area am I roughly in", which
-      // is all this app actually needs from it. Also true on a real phone,
-      // just less dramatically slow there.
+      // Transportation uses the coordinate as the actual route origin, so
+      // request navigation-grade accuracy rather than accepting a coarse
+      // Wi-Fi/IP fix. The bounded timeout still prevents an emulator with
+      // no configured location from hanging the screen indefinitely.
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.low,
-          timeLimit: Duration(seconds: 5),
+          accuracy: LocationAccuracy.bestForNavigation,
+          timeLimit: Duration(seconds: 18),
         ),
       );
 
@@ -93,16 +79,47 @@ class LocationService {
   /// timeout, unexpected response) - reverse geocoding is a nice-to-have,
   /// never something that should block using the app.
   Future<String> _reverseGeocode(double lat, double lng) async {
+    if (ApiConfig.hasHereApiKey) {
+      try {
+        final uri =
+            Uri.parse(
+              'https://revgeocode.search.hereapi.com/v1/revgeocode',
+            ).replace(
+              queryParameters: {
+                'at': '$lat,$lng',
+                'limit': '1',
+                'lang': 'en',
+                'apiKey': ApiConfig.hereApiKey,
+              },
+            );
+        final response = await http
+            .get(uri)
+            .timeout(const Duration(seconds: 6));
+        if (response.statusCode == 200) {
+          final body = jsonDecode(response.body) as Map<String, dynamic>;
+          final items = body['items'] as List?;
+          if (items != null && items.isNotEmpty) {
+            final item = items.first as Map<String, dynamic>;
+            final name = _nameFromHereItem(item);
+            if (name != null && name.isNotEmpty) return name;
+          }
+        }
+      } catch (_) {
+        // Keep the keyless Nominatim fallback below.
+      }
+    }
+
     try {
-      final uri = Uri.parse('https://nominatim.openstreetmap.org/reverse').replace(
-        queryParameters: {
-          'format': 'jsonv2',
-          'lat': '$lat',
-          'lon': '$lng',
-          'zoom': '16',
-          'addressdetails': '1',
-        },
-      );
+      final uri = Uri.parse('https://nominatim.openstreetmap.org/reverse')
+          .replace(
+            queryParameters: {
+              'format': 'jsonv2',
+              'lat': '$lat',
+              'lon': '$lng',
+              'zoom': '16',
+              'addressdetails': '1',
+            },
+          );
 
       final response = await http
           .get(
@@ -138,65 +155,223 @@ class LocationService {
   /// / "To" fields can show live suggestions as the user types instead of
   /// only resolving a single best guess.
   ///
-  /// Purely live - every result comes from OpenStreetMap's free Nominatim
-  /// search endpoint, no built-in preset list. Duplicate-looking results
-  /// (same short label) are collapsed to one.
+  /// Purely live either way - no built-in preset list. When a HERE key is
+  /// configured, [_searchHereAutosuggest] is tried first: HERE's
+  /// Autosuggest API (https://autosuggest.search.hereapi.com) is a real
+  /// search-as-you-type product - the same kind of thing Google Maps'
+  /// search box uses - and finds a specific street/POI by partial name
+  /// (e.g. "Bishop Street") far more reliably than Nominatim's free-text
+  /// search, which is built for resolving one specific address rather
+  /// than ranking partial-keyword matches. [_searchNominatim] (the
+  /// original implementation) is the fallback - no HERE key configured,
+  /// or the HERE call fails/times out/returns nothing - so search never
+  /// goes fully dead just because one live source had a problem.
+  /// Duplicate-looking results (same short label) are collapsed to one.
   ///
   /// Returns an empty list if the keyword is too short, nothing matches,
-  /// or the live lookup fails/times out (offline, rate-limited, etc.).
-  Future<List<LocationPoint>> searchPlaces(String keyword, {int limit = 5}) async {
+  /// or every live lookup fails/times out (offline, rate-limited, etc.).
+  Future<List<LocationPoint>> searchPlaces(
+    String keyword, {
+    int limit = 8,
+    LocationPoint? bias,
+  }) async {
+    await ApiConfig.ensureLoaded();
     final query = keyword.trim();
     if (query.isEmpty) return const [];
 
-    List<LocationPoint> liveMatches = const [];
-    try {
-      final uri = Uri.parse('https://nominatim.openstreetmap.org/search').replace(
-        queryParameters: {
-          'q': query,
-          'format': 'jsonv2',
-          'addressdetails': '1',
-          'limit': '$limit',
-          // This app only covers Malaysian routes - keep suggestions
-          // relevant instead of matching short keywords anywhere on Earth.
-          'countrycodes': 'my',
-        },
-      );
-
-      final response = await http
-          .get(
-            uri,
-            headers: const {'User-Agent': 'collab_assignment_flutter_app/1.0'},
-          )
-          .timeout(const Duration(seconds: 8));
-
-      if (response.statusCode == 200) {
-        final results = jsonDecode(response.body) as List;
-        final points = <LocationPoint>[];
-
-        for (final entry in results) {
-          final body = entry as Map<String, dynamic>;
-          final lat = double.tryParse(body['lat']?.toString() ?? '');
-          final lng = double.tryParse(body['lon']?.toString() ?? '');
-          if (lat == null || lng == null) continue;
-
-          points.add(LocationPoint(name: _shortLabelFrom(body) ?? query, lat: lat, lng: lng));
-        }
-        liveMatches = points;
+    var liveMatches = const <LocationPoint>[];
+    if (ApiConfig.hasHereApiKey) {
+      try {
+        liveMatches = await _searchHereAutosuggest(
+          query,
+          limit: limit,
+          bias: bias,
+        );
+      } catch (_) {
+        // Fall through to Nominatim below.
       }
-    } catch (_) {
-      // Live search failed/timed out - liveMatches just stays empty rather
-      // than throwing, so the UI shows "no results" instead of crashing.
+    }
+    if (liveMatches.isEmpty) {
+      try {
+        liveMatches = await _searchNominatim(query, limit: limit);
+      } catch (_) {
+        // Live search failed/timed out - liveMatches just stays empty
+        // rather than throwing, so the UI shows "no results" instead of
+        // crashing.
+      }
     }
 
-    // Nominatim can return several results that shorten to the same
+    // Either source can return several results that shorten to the same
     // "Area, City" label (e.g. two POIs on the same road) - keep the list
     // free of visually-duplicate suggestions.
-    final seenNames = <String>{};
+    final seenPlaces = <String>{};
     final deduped = <LocationPoint>[];
     for (final point in liveMatches) {
-      if (seenNames.add(point.name)) deduped.add(point);
+      final key =
+          '${point.name.toLowerCase()}|'
+          '${point.lat.toStringAsFixed(5)},${point.lng.toStringAsFixed(5)}';
+      if (seenPlaces.add(key)) deduped.add(point);
     }
     return deduped.take(limit).toList();
+  }
+
+  /// HERE's Autosuggest API - real search-as-you-type, ranked by
+  /// relevance against partial input, the way Google Maps' search box
+  /// behaves. `in=countryCode:MYS` scopes results to Malaysia (this app
+  /// only covers Malaysian routes) without needing a bias coordinate.
+  /// Only keeps items that are an actual place with real coordinates
+  /// (`resultType` like "place"/"street"/"locality"/"houseNumber" - all
+  /// carry a real `position`); HERE also returns "categoryQuery"/
+  /// "chainQuery" items ("restaurants near me"-style query refinements
+  /// with no coordinates of their own), which aren't a real destination
+  /// and are skipped.
+  Future<List<LocationPoint>> _searchHereAutosuggest(
+    String query, {
+    required int limit,
+    LocationPoint? bias,
+  }) async {
+    final areaParameter = bias == null
+        ? <String, String>{'in': 'countryCode:MYS'}
+        : <String, String>{'at': '${bias.lat},${bias.lng}'};
+    final uri =
+        Uri.parse(
+          'https://autosuggest.search.hereapi.com/v1/autosuggest',
+        ).replace(
+          queryParameters: {
+            'q': query,
+            'limit': '$limit',
+            'lang': 'en',
+            'apiKey': ApiConfig.hereApiKey,
+            ...areaParameter,
+          },
+        );
+
+    final response = await http.get(uri).timeout(const Duration(seconds: 6));
+    if (response.statusCode != 200) return const [];
+
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final items = body['items'] as List?;
+    if (items == null) return const [];
+
+    final points = <LocationPoint>[];
+    for (final raw in items) {
+      try {
+        final item = raw as Map<String, dynamic>;
+        // For a mall/restaurant the access point is a better routing
+        // destination than the POI's visual centre (which may sit inside a
+        // large building). Fall back to the display position when HERE has
+        // no access point for the result.
+        final access = item['access'] as List?;
+        final position = access != null && access.isNotEmpty
+            ? access.first as Map<String, dynamic>?
+            : item['position'] as Map<String, dynamic>?;
+        if (position == null) {
+          continue; // categoryQuery/chainQuery - not a real place.
+        }
+        final lat = (position['lat'] as num?)?.toDouble();
+        final lng = (position['lng'] as num?)?.toDouble();
+        if (lat == null || lng == null) continue;
+
+        points.add(
+          LocationPoint(
+            name: _nameFromHereItem(item) ?? query,
+            lat: lat,
+            lng: lng,
+          ),
+        );
+      } catch (_) {
+        // Skip a single malformed item.
+      }
+    }
+    return points;
+  }
+
+  /// The original implementation, now the fallback when no HERE key is
+  /// configured or [_searchHereAutosuggest] didn't produce anything -
+  /// OpenStreetMap's free Nominatim search endpoint, no API key needed.
+  Future<List<LocationPoint>> _searchNominatim(
+    String query, {
+    required int limit,
+  }) async {
+    final uri = Uri.parse('https://nominatim.openstreetmap.org/search').replace(
+      queryParameters: {
+        'q': query,
+        'format': 'jsonv2',
+        'addressdetails': '1',
+        'limit': '$limit',
+        // This app only covers Malaysian routes - keep suggestions
+        // relevant instead of matching short keywords anywhere on Earth.
+        'countrycodes': 'my',
+      },
+    );
+
+    final response = await http
+        .get(
+          uri,
+          headers: const {'User-Agent': 'collab_assignment_flutter_app/1.0'},
+        )
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode != 200) return const [];
+
+    final results = jsonDecode(response.body) as List;
+    final points = <LocationPoint>[];
+
+    for (final entry in results) {
+      final body = entry as Map<String, dynamic>;
+      final lat = double.tryParse(body['lat']?.toString() ?? '');
+      final lng = double.tryParse(body['lon']?.toString() ?? '');
+      if (lat == null || lng == null) continue;
+
+      points.add(
+        LocationPoint(name: _shortLabelFrom(body) ?? query, lat: lat, lng: lng),
+      );
+    }
+    return points;
+  }
+
+  /// Builds the display name for a HERE Autosuggest item. `title` is the
+  /// entity HERE actually matched against the typed query - for a real
+  /// POI like "Gurney Paragon" that's already the exact name a user typed
+  /// and expects to see back, so it comes FIRST, not last: an earlier
+  /// version of this preferred a generic "district, city" label built
+  /// from `address` (e.g. "Central George Town, George Town") over the
+  /// real matched name, which meant search results never actually showed
+  /// what was typed/searched for - defeating the entire point of using a
+  /// real search-as-you-type API. `title` is only enriched with a short
+  /// city/district suffix when that adds real disambiguating context not
+  /// already present in the title itself (e.g. "Gurney Paragon, George
+  /// Town" rather than just "Gurney Paragon" with no area shown at all).
+  /// Falls back to the old pure-address shortening only for the rare item
+  /// that has no title at all.
+  String? _nameFromHereItem(Map<String, dynamic> item) {
+    final title = item['title'] as String?;
+    final address = item['address'] as Map<String, dynamic>?;
+
+    if (title != null && title.isNotEmpty) {
+      final area = (address?['city'] ?? address?['district']) as String?;
+      if (area != null && area.isNotEmpty && !title.contains(area)) {
+        return '$title, $area';
+      }
+      return title;
+    }
+
+    if (address == null) return null;
+    final locality =
+        address['street'] ?? address['district'] ?? address['city'];
+    final city = address['city'] ?? address['county'] ?? address['state'];
+    final parts = <String>{
+      if (locality is String && locality.isNotEmpty) locality,
+      if (city is String && city.isNotEmpty) city,
+    }.toList();
+    if (parts.isNotEmpty) return parts.join(', ');
+
+    final label = address['label'] as String?;
+    if (label != null && label.isNotEmpty) {
+      final segments = label.split(',').map((s) => s.trim()).toList();
+      return segments.take(2).join(', ');
+    }
+    return null;
   }
 
   /// Shared "Area, City" style shortener for a Nominatim result - used for

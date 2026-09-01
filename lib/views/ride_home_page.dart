@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 
 import '../controllers/transport_controller.dart';
+import '../core/api_config.dart';
 import '../core/app_assets.dart';
 import '../core/app_theme.dart';
 import '../models/location_point.dart';
@@ -51,19 +53,24 @@ class _TransportationPageState extends State<TransportationPage> {
 
   List<SavedTrip> _savedPreview = const [];
 
-  /// A single suggested-destination ride option shown in "Recommended For
-  /// You" (see `_loadRecommendation`). Null while there's nothing to
-  /// suggest yet (location not resolved) or while it's loading.
-  RideOption? _recommendedOption;
-  LocationPoint? _recommendedDestination;
-  bool _loadingRecommendation = false;
+  // Null until a real recommendation has loaded (or none could be found) -
+  // see _loadRecommendation/RecommendedPanel below. Also reachable after a
+  // search via the header shortcut (see _showRecommendedSheet), since the
+  // panel itself is normally replaced by the results list once a
+  // destination is picked.
+  RecommendedRide? _recommended;
 
   @override
   void initState() {
     super.initState();
     _departAt = DateTime.now();
-    _detectFromLocation();
-    _loadSavedPreview();
+    _initializeTransportation();
+  }
+
+  Future<void> _initializeTransportation() async {
+    await ApiConfig.ensureLoaded();
+    if (!mounted) return;
+    await Future.wait([_detectFromLocation(), _loadSavedPreview()]);
   }
 
   Future<void> _detectFromLocation() async {
@@ -87,14 +94,10 @@ class _TransportationPageState extends State<TransportationPage> {
       return;
     }
 
-    // Unexpected failure (GPS timeout, etc.) rather than a deliberate
-    // denial - fall back to a sensible default so the app is still usable.
-    setState(() {
-      _from = _controller.defaultFallbackLocation;
-    });
+    // Never invent a fixed origin. A failed GPS lookup leaves the field
+    // empty so the user can retry or choose a real searched place.
+    setState(() => _fromPlaceholder = 'Tap to select your location');
     _showLocationFallbackNotice(result.status);
-    _search();
-    _loadRecommendation();
   }
 
   void _showLocationFallbackNotice(LocationLookupStatus status) {
@@ -104,9 +107,12 @@ class _TransportationPageState extends State<TransportationPage> {
         'Location permission denied - tap "From" to pick your starting point.',
       LocationLookupStatus.serviceDisabled =>
         'Location services are off - tap "From" to pick your starting point.',
-      _ => "Couldn't detect your location - using KL Sentral as your starting point.",
+      _ =>
+        "Couldn't get an accurate GPS fix - tap From to search a real place.",
     };
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _search() async {
@@ -148,7 +154,63 @@ class _TransportationPageState extends State<TransportationPage> {
     final all = await _controller.getSavedTrips();
     if (!mounted) return;
     setState(() => _savedPreview = all.take(3).toList());
-    _loadRecommendation();
+  }
+
+  /// Best-effort only - see TransportController.recommendedRideTo's doc
+  /// comment. A null result (or an exception) just means _recommended
+  /// stays/becomes null, which hides both the inline panel and the
+  /// header shortcut - never shown as an error to the person, since
+  /// there was never a "recommendation" action they took that failed.
+  Future<void> _loadRecommendation() async {
+    final from = _from;
+    if (from == null) return;
+    try {
+      final recommended = await _controller.recommendedRideTo(from);
+      if (!mounted) return;
+      setState(() => _recommended = recommended);
+    } catch (error) {
+      debugPrint('[TransportationPage] recommendation load failed: $error');
+    }
+  }
+
+  /// Fills "To" with the recommended destination and runs a fresh search
+  /// to it - same as tapping any real place suggestion, whether this was
+  /// reached from the inline panel (before a search) or the header
+  /// shortcut's bottom sheet (after one) - see _showRecommendedSheet.
+  void _selectRecommended(RecommendedRide recommended) {
+    setState(() => _to = recommended.to);
+    _search();
+  }
+
+  /// Re-opens the "Recommended For You" panel after a search, since it's
+  /// normally hidden once a destination is picked (replaced by the
+  /// results list) and there's no "back" step that brings it back on its
+  /// own - see the header's lightbulb button in build().
+  void _showRecommendedSheet() {
+    final recommended = _recommended;
+    if (recommended == null) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+        ),
+        child: SafeArea(
+          top: false,
+          child: RecommendedPanel(
+            option: recommended.option,
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              _selectRecommended(recommended);
+            },
+          ),
+        ),
+      ),
+    );
   }
 
   void _swap() {
@@ -177,71 +239,6 @@ class _TransportationPageState extends State<TransportationPage> {
     _search();
   }
 
-  /// Picks a placeholder suggested destination via [TransportController]
-  /// and generates a single offline route to it, purely for display in
-  /// "Recommended For You". This is a stand-in until the travel-plan
-  /// module a teammate is building can supply a real pick.
-  Future<void> _loadRecommendation() async {
-    final from = _from;
-    if (from == null) {
-      setState(() {
-        _recommendedOption = null;
-        _recommendedDestination = null;
-      });
-      return;
-    }
-
-    final destination = _controller.pickRecommendedDestination(
-      from: from,
-      savedTrips: _savedPreview,
-    );
-    if (destination == null) {
-      setState(() {
-        _recommendedOption = null;
-        _recommendedDestination = null;
-      });
-      return;
-    }
-
-    setState(() => _loadingRecommendation = true);
-    try {
-      final option = await _controller.recommendedRideTo(
-        from: from,
-        destination: destination,
-      );
-      if (!mounted) return;
-      setState(() {
-        _recommendedOption = option;
-        _recommendedDestination = destination;
-        _loadingRecommendation = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _recommendedOption = null;
-        _recommendedDestination = null;
-        _loadingRecommendation = false;
-      });
-    }
-  }
-
-  void _selectRecommendedDestination() {
-    final destination = _recommendedDestination;
-    if (destination == null) return;
-    if (destination == _from) {
-      _showSameLocationWarning();
-      return;
-    }
-    setState(() => _to = destination);
-    _search();
-  }
-
-  void _showSameLocationWarning() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Origin and destination can't be the same.")),
-    );
-  }
-
   Future<void> _pickDate() async {
     final date = await showDatePicker(
       context: context,
@@ -258,7 +255,13 @@ class _TransportationPageState extends State<TransportationPage> {
     if (time == null) return;
 
     setState(() {
-      _departAt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+      _departAt = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        time.hour,
+        time.minute,
+      );
     });
     _search();
   }
@@ -318,6 +321,22 @@ class _TransportationPageState extends State<TransportationPage> {
                       children: [
                         Image.asset(AppAssets.logo, width: 148, height: 42),
                         const Spacer(),
+                        // Only appears once a real recommendation has
+                        // loaded (see _loadRecommendation) - lets a
+                        // person reopen "Recommended For You" after
+                        // they've already picked a destination, since
+                        // the inline panel below is replaced by the
+                        // results list at that point and there's no
+                        // "back" step that brings it back on its own.
+                        if (_recommended != null)
+                          IconButton(
+                            onPressed: _showRecommendedSheet,
+                            tooltip: 'Recommended for you',
+                            icon: const Icon(
+                              Icons.lightbulb_outline,
+                              color: AppColors.green,
+                            ),
+                          ),
                         IconButton(
                           onPressed: _openSavedList,
                           tooltip: 'Saved trips',
@@ -356,40 +375,27 @@ class _TransportationPageState extends State<TransportationPage> {
                     if (hasDestination)
                       ..._buildResultsSection()
                     else ...[
-                      // Real "recommended" content will come from a
-                      // teammate's travel-plan module later - for now this
-                      // is a placeholder pick (see `_loadRecommendation`),
-                      // shown with the same card style as the rest of the
-                      // app so the panel isn't empty.
-                      if (_recommendedOption != null) ...[
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 4),
+                        child: Text(
+                          'Search for a real destination above to see ride options.',
+                          style: TextStyle(
+                            color: AppColors.muted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      if (_recommended != null) ...[
                         RecommendedPanel(
-                          option: _recommendedOption!,
-                          onTap: _selectRecommendedDestination,
+                          option: _recommended!.option,
+                          onTap: () => _selectRecommended(_recommended!),
                         ),
-                        const SizedBox(height: 15),
-                      ] else if (_loadingRecommendation)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          child: Center(
-                            child: SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.2,
-                                color: AppColors.green,
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 4),
-                          child: Text(
-                            'Pick a destination above to see ride options.',
-                            style: TextStyle(color: AppColors.muted, fontSize: 12),
-                          ),
-                        ),
-                      SectionHeading(title: 'Saved List', onTap: _openSavedList),
+                        const SizedBox(height: 14),
+                      ],
+                      SectionHeading(
+                        title: 'Saved List',
+                        onTap: _openSavedList,
+                      ),
                       const SizedBox(height: 8),
                       ..._buildSavedPreviewSection(),
                     ],
@@ -427,7 +433,9 @@ class _TransportationPageState extends State<TransportationPage> {
       return const [
         Padding(
           padding: EdgeInsets.symmetric(vertical: 28),
-          child: Center(child: CircularProgressIndicator(color: AppColors.green)),
+          child: Center(
+            child: CircularProgressIndicator(color: AppColors.green),
+          ),
         ),
       ];
     }
@@ -521,9 +529,9 @@ class _SimulatedDataBanner extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.orange.withOpacity(0.10),
+        color: AppColors.orange.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.orange.withOpacity(0.45)),
+        border: Border.all(color: AppColors.orange.withValues(alpha: 0.45)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -549,7 +557,11 @@ class _SimulatedDataBanner extends StatelessWidget {
 }
 
 class RecommendedPanel extends StatelessWidget {
-  const RecommendedPanel({super.key, required this.option, required this.onTap});
+  const RecommendedPanel({
+    super.key,
+    required this.option,
+    required this.onTap,
+  });
 
   final RideOption option;
   final VoidCallback onTap;

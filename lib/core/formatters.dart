@@ -47,3 +47,12 @@ String formatDuration(Duration duration) {
 }
 
 String formatRm(double amount) => 'RM ${amount.toStringAsFixed(2)}';
+
+/// e.g. 0 -> "Direct", 1 -> "1 Transfer", 2 -> "2 Transfers". Shared by
+/// the results list (RideCard) and the trip details header (TripSummary)
+/// so both describe [RideOption.transferCount] the same way.
+String transferCountLabel(int transferCount) {
+  if (transferCount <= 0) return 'Direct';
+  if (transferCount == 1) return '1 Transfer';
+  return '$transferCount Transfers';
+}

@@ -47,9 +47,10 @@ dependencies:
   shared_preferences: ^2.5.3
   url_launcher: ^6.3.2
 
-  # Real interactive map (tiles + markers + route line) for the
-  # transportation module's live navigation screen.
-  flutter_map: ^8.0.0
+  # Google's native, road-snapped, real-time turn-by-turn navigation view.
+  # HERE remains the transportation planner/search/intermodal provider.
+  google_navigation_flutter: ^0.10.0
+  # Used by transportation proximity calculations for live stops/bike docks.
   latlong2: ^0.9.1
 
 dev_dependencies:
@@ -76,6 +77,9 @@ flutter:
 
   assets:
     - assets/images/
+    # Local, git-ignored transportation credentials. This lets ordinary
+    # Android Studio Run configurations load HERE without manual flags.
+    - env.json
 
   # To add assets to your application, add an assets section, like this:
   # assets:

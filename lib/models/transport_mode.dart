@@ -104,7 +104,7 @@ extension TransportModeX on TransportMode {
       case 'bicycle':
         // What HERE's Intermodal Routing API uses for a shared-bike leg
         // (paired with section type "rented" - see
-        // HereTransitService.searchBikeShare). A plain "bicycle" mode
+        // HereTransitService.searchIntermodal). A plain "bicycle" mode
         // without that section type shouldn't normally appear from the
         // endpoints this app calls, but mapping it here regardless is
         // harmless and more correct than falling through to "other".
