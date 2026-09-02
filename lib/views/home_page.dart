@@ -2,10 +2,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../controllers/home_controller.dart';
+import '../controllers/personalization_controller.dart';
 import '../models/attraction.dart';
 import '../widgets/eco_bottom_navigation.dart';
 
 import 'ai_trip_planner_page.dart';
+import 'attraction_detail_page.dart';
+import 'attraction_search_page.dart';
+import 'ride_home_page.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback? onTransportTap;
@@ -48,9 +52,9 @@ class _HomePageState extends State<HomePage> {
   final MobileHomeController _controller =
   MobileHomeController();
 
-  final TextEditingController
-  _searchController =
-  TextEditingController();
+  final PersonalizationController
+  _personalizationController =
+  PersonalizationController();
 
   // ============================================================
   // INIT
@@ -64,13 +68,26 @@ class _HomePageState extends State<HomePage> {
       _refreshPage,
     );
 
+    _personalizationController.addListener(
+      _refreshPage,
+    );
+
     _controller.loadHomeData();
+    _personalizationController.loadRecommendations();
   }
 
   void _refreshPage() {
     if (mounted) {
       setState(() {});
     }
+  }
+
+  Future<void> _refreshHome() async {
+    await Future.wait([
+      _controller.refresh(),
+      _personalizationController
+          .refreshRecommendations(),
+    ]);
   }
 
   void _openAiTripPlanner() {
@@ -82,14 +99,27 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openTransportation() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const TransportationPage(),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _controller.removeListener(
       _refreshPage,
     );
 
+    _personalizationController.removeListener(
+      _refreshPage,
+    );
+
     _controller.dispose();
-    _searchController.dispose();
+    _personalizationController.dispose();
 
     super.dispose();
   }
@@ -107,7 +137,7 @@ class _HomePageState extends State<HomePage> {
         bottom: false,
         child: RefreshIndicator(
           color: mainGreen,
-          onRefresh: _controller.refresh,
+          onRefresh: _refreshHome,
 
           child: SingleChildScrollView(
             physics:
@@ -181,7 +211,7 @@ class _HomePageState extends State<HomePage> {
           // Already on Home Page.
         },
 
-        onTransportTap: widget.onTransportTap,
+        onTransportTap: _openTransportation,
 
         onPlanTripTap: _openAiTripPlanner,
 
@@ -202,37 +232,13 @@ class _HomePageState extends State<HomePage> {
         Row(
           children: [
             // Logo
-            Row(
-              children: [
-                const Icon(
-                  Icons.luggage_rounded,
-                  color: mainGreen,
-                  size: 25,
-                ),
-
-                Transform.translate(
-                  offset:
-                  const Offset(-7, 7),
-                  child: const Icon(
-                    Icons.eco,
-                    color: mainGreen,
-                    size: 17,
-                  ),
-                ),
-
-                const SizedBox(width: 1),
-
-                const Text(
-                  'EcoTravel',
-                  style: TextStyle(
-                    color: mainGreen,
-                    fontSize: 21,
-                    fontWeight:
-                    FontWeight.w700,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-              ],
+            Transform.translate(
+              offset: const Offset(-7, 0),
+              child: Image.asset(
+                'assets/images/logo.png',
+                height: 55,
+                fit: BoxFit.contain,
+              ),
             ),
 
             const Spacer(),
@@ -329,71 +335,58 @@ class _HomePageState extends State<HomePage> {
   // ============================================================
 
   Widget _searchBar() {
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius:
-        BorderRadius.circular(11),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(
-              alpha: 0.09,
+    return InkWell(
+      onTap: _openAttractionSearch,
+      borderRadius: BorderRadius.circular(11),
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(
+          horizontal: 14,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(11),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: 0.09,
+              ),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
+          ],
+        ),
+        child: const Row(
+          children: [
+            Icon(
+              Icons.search,
+              size: 21,
+              color: Color(0xFF999999),
+            ),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Search attractions...',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: Color(0xFFAAAAAA),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
 
-      child: TextField(
-        controller: _searchController,
-
-        textInputAction:
-        TextInputAction.search,
-
-        style: const TextStyle(
-          fontSize: 12,
+  void _openAttractionSearch() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AttractionSearchPage(
+          personalizationController:
+          _personalizationController,
         ),
-
-        decoration: InputDecoration(
-          border: InputBorder.none,
-
-          contentPadding:
-          const EdgeInsets.symmetric(
-            vertical: 14,
-          ),
-
-          prefixIcon: const Icon(
-            Icons.search,
-            size: 21,
-            color: Color(0xFF999999),
-          ),
-
-          hintText:
-          'Search destination, eco-activities, guides...',
-
-          hintStyle:
-          const TextStyle(
-            fontSize: 10.5,
-            color: Color(0xFFAAAAAA),
-          ),
-
-          suffixIcon: IconButton(
-            onPressed: () {
-              _showFilterSheet();
-            },
-            icon: const Icon(
-              Icons.tune_rounded,
-              color: mainGreen,
-              size: 20,
-            ),
-          ),
-        ),
-
-        onSubmitted: (value) {
-          _searchAttraction(value);
-        },
       ),
     );
   }
@@ -907,7 +900,8 @@ class _HomePageState extends State<HomePage> {
   // ============================================================
 
   Widget _recommendationSection() {
-    if (_controller.isLoading) {
+    if (_controller.isLoading ||
+        _personalizationController.isLoadingRecommendations) {
       return const SizedBox(
         height: 99,
         child: Center(
@@ -920,7 +914,7 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    if (_controller
+    if (_personalizationController
         .recommendedAttractions
         .isEmpty) {
       return Container(
@@ -951,7 +945,7 @@ class _HomePageState extends State<HomePage> {
         scrollDirection:
         Axis.horizontal,
 
-        itemCount: _controller
+        itemCount: _personalizationController
             .recommendedAttractions
             .length,
 
@@ -964,7 +958,7 @@ class _HomePageState extends State<HomePage> {
         itemBuilder:
             (context, index) {
           final attraction =
-          _controller
+          _personalizationController
               .recommendedAttractions[
           index];
 
@@ -998,7 +992,18 @@ class _HomePageState extends State<HomePage> {
 
       child: GestureDetector(
         onTap: () {
-          // Attraction details navigation later.
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AttractionDetailPage(
+                attraction: attraction,
+              ),
+            ),
+          );
+
+          _personalizationController.recordView(
+            attraction,
+          );
         },
 
         child: Column(
@@ -1108,24 +1113,17 @@ class _HomePageState extends State<HomePage> {
 
             const Spacer(),
 
-            const Row(
-              children: [
-                Icon(
-                  Icons.eco,
-                  size: 8,
-                  color: mainGreen,
-                ),
-                SizedBox(width: 2),
-                Text(
-                  'Low Impact',
-                  style: TextStyle(
-                    fontSize: 6.5,
-                    color: mainGreen,
-                    fontWeight:
-                    FontWeight.w600,
-                  ),
-                ),
-              ],
+            Text(
+              attraction.categoryName.isEmpty
+                  ? 'Attraction'
+                  : attraction.categoryName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 6.5,
+                color: mainGreen,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ],
         ),
@@ -1415,313 +1413,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ],
-    );
-  }
-
-  // ============================================================
-  // SEARCH
-  // ============================================================
-
-  void _searchAttraction(
-      String keyword,
-      ) {
-    final search =
-    keyword.trim().toLowerCase();
-
-    if (search.isEmpty) {
-      return;
-    }
-
-    final result = _controller
-        .recommendedAttractions
-        .where(
-          (item) =>
-      item.name
-          .toLowerCase()
-          .contains(search) ||
-          item.state
-              .toLowerCase()
-              .contains(search) ||
-          item.area
-              .toLowerCase()
-              .contains(search) ||
-          item.categoryName
-              .toLowerCase()
-              .contains(search),
-    )
-        .toList();
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor:
-      Colors.transparent,
-      isScrollControlled: true,
-
-      builder: (context) {
-        return SafeArea(
-          child: Container(
-            constraints:
-            BoxConstraints(
-              maxHeight:
-              MediaQuery.sizeOf(
-                context,
-              ).height *
-                  0.70,
-            ),
-
-            padding:
-            const EdgeInsets.all(
-              18,
-            ),
-
-            decoration:
-            const BoxDecoration(
-              color: Colors.white,
-              borderRadius:
-              BorderRadius.vertical(
-                top: Radius.circular(
-                  22,
-                ),
-              ),
-            ),
-
-            child: Column(
-              mainAxisSize:
-              MainAxisSize.min,
-
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
-
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Search results for "$keyword"',
-                        maxLines: 1,
-                        overflow:
-                        TextOverflow
-                            .ellipsis,
-                        style:
-                        const TextStyle(
-                          fontSize: 16,
-                          fontWeight:
-                          FontWeight
-                              .w700,
-                        ),
-                      ),
-                    ),
-
-                    IconButton(
-                      onPressed: () =>
-                          Navigator.pop(
-                            context,
-                          ),
-                      icon:
-                      const Icon(
-                        Icons.close,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(
-                    height: 8),
-
-                if (result.isEmpty)
-                  const Padding(
-                    padding:
-                    EdgeInsets
-                        .symmetric(
-                      vertical: 30,
-                    ),
-                    child: Center(
-                      child: Text(
-                        'No attraction found.',
-                      ),
-                    ),
-                  )
-                else
-                  Flexible(
-                    child:
-                    ListView.separated(
-                      shrinkWrap: true,
-
-                      itemCount:
-                      result.length,
-
-                      separatorBuilder:
-                          (
-                          context,
-                          index,
-                          ) =>
-                      const Divider(
-                        height: 1,
-                      ),
-
-                      itemBuilder:
-                          (
-                          context,
-                          index,
-                          ) {
-                        final item =
-                        result[
-                        index];
-
-                        return ListTile(
-                          contentPadding:
-                          EdgeInsets
-                              .zero,
-
-                          leading:
-                          const CircleAvatar(
-                            backgroundColor:
-                            lightGreen,
-                            child: Icon(
-                              Icons.place,
-                              color:
-                              mainGreen,
-                            ),
-                          ),
-
-                          title: Text(
-                            item.name,
-                            maxLines: 1,
-                            overflow:
-                            TextOverflow
-                                .ellipsis,
-                          ),
-
-                          subtitle:
-                          Text(
-                            _attractionLocation(
-                              item,
-                            ),
-                            maxLines: 1,
-                            overflow:
-                            TextOverflow
-                                .ellipsis,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // ============================================================
-  // FILTER
-  // ============================================================
-
-  void _showFilterSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor:
-      Colors.transparent,
-
-      builder: (context) {
-        return SafeArea(
-          child: Container(
-            padding:
-            const EdgeInsets.all(
-              20,
-            ),
-
-            decoration:
-            const BoxDecoration(
-              color: Colors.white,
-              borderRadius:
-              BorderRadius.vertical(
-                top: Radius.circular(
-                  22,
-                ),
-              ),
-            ),
-
-            child: Column(
-              mainAxisSize:
-              MainAxisSize.min,
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
-
-              children: [
-                const Text(
-                  'Explore Filters',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight:
-                    FontWeight.w700,
-                  ),
-                ),
-
-                const SizedBox(
-                    height: 15),
-
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-
-                  children: [
-                    _filterChip(
-                      'Cultural',
-                    ),
-                    _filterChip(
-                      'Nature',
-                    ),
-                    _filterChip(
-                      'Heritage',
-                    ),
-                    _filterChip(
-                      'Eco Activities',
-                    ),
-                    _filterChip(
-                      'Low Impact',
-                    ),
-                  ],
-                ),
-
-                const SizedBox(
-                    height: 20),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _filterChip(
-      String text,
-      ) {
-    return Container(
-      padding:
-      const EdgeInsets.symmetric(
-        horizontal: 13,
-        vertical: 8,
-      ),
-
-      decoration: BoxDecoration(
-        color: lightGreen,
-        borderRadius:
-        BorderRadius.circular(
-          20,
-        ),
-      ),
-
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: mainGreen,
-          fontSize: 11,
-          fontWeight:
-          FontWeight.w500,
-        ),
-      ),
     );
   }
 }

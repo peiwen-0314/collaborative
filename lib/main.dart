@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 
 import 'firebase_options.dart';
 import 'views/admin_login_page.dart';
+import 'views/login_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -97,8 +98,9 @@ class MyApp extends StatelessWidget {
       ),
 
       // Temporary: directly open Admin Login
-     // home: const AdminLoginPage(),
-      home: const TransportationPage(),
+      // home: const LoginPage(),
+      home: const AdminLoginPage(),
+      //home: const TransportationPage(),
     );
   }
 }

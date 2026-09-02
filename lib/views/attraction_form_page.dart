@@ -379,7 +379,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     return _sectionCard(
       title: 'Visit Information',
       subtitle:
-      'Set Malaysian and non-Malaysian entry fees, opening hours and visit duration.',
+      'Enter only the entry fees that apply. Leave fields blank when the same price is used for multiple visitor groups.',
       icon: Icons.schedule_outlined,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -424,6 +424,32 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
               ],
             ),
           ),
+          const SizedBox(height: 12),
+          if (!_isFreeEntry)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 11,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(
+                  color: const Color(0xFFBBF7D0),
+                ),
+              ),
+              child: const Text(
+                'Price fields are optional. Enter only prices that are different. '
+                    'Blank age prices will use the Adult price for that visitor group. '
+                    'If Non-Malaysian prices are blank, Malaysian prices will be used.',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.4,
+                  color: Color(0xFF166534),
+                ),
+              ),
+            ),
           const SizedBox(height: 18),
           _priceGroup(
             title: 'Malaysian',
@@ -447,19 +473,18 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
                 'Opening Time',
                 _timeField(
                   value: _openingTime,
-                  placeholder: 'Select opening time',
+                  placeholder: 'Optional',
                   onTap: _pickOpeningTime,
                 ),
-                required: true,
               );
+
               final closing = _fieldBlock(
                 'Closing Time',
                 _timeField(
                   value: _closingTime,
-                  placeholder: 'Select closing time',
+                  placeholder: 'Optional',
                   onTap: _pickClosingTime,
                 ),
-                required: true,
               );
               final duration = _fieldBlock(
                 'Recommended Sightseeing Time',
@@ -620,12 +645,24 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _label('Phone Number', required: true),
+                    _label('Phone Number'),
+                    _phoneField(),
+                    const SizedBox(height: 5),
+                    const Text(
+                      'Optional • Malaysia format, e.g. +60123456789',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: secondaryText,
+                      ),
+                    ),
                     _phoneField(),
                     const SizedBox(height: 5),
                     const Text(
                       'Malaysia format only. Example: +60123456789',
-                      style: TextStyle(fontSize: 11, color: secondaryText),
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: secondaryText
+                      ),
                     ),
                   ],
                 ),
@@ -1278,7 +1315,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
         LengthLimitingTextInputFormatter(7),
       ],
       decoration: InputDecoration(
-        hintText: '0.00',
+        hintText: 'Optional',
         hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF98A2B3)),
         prefixIcon: Container(
           width: 54,
@@ -1584,13 +1621,23 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 
-  double? _validateFee(TextEditingController controller) {
+  bool _isValidOptionalFee(TextEditingController controller) {
+    final text = controller.text.trim();
+
+    if (text.isEmpty) return true;
+
+    if (!RegExp(r'^\d{1,4}(\.\d{1,2})?$').hasMatch(text)) {
+      return false;
+    }
+
+    final value = double.tryParse(text);
+    return value != null && value >= 0 && value <= 9999;
+  }
+
+  double? _optionalFee(TextEditingController controller) {
     final text = controller.text.trim();
     if (text.isEmpty) return null;
-    if (!RegExp(r'^\d{1,4}(\.\d{1,2})?$').hasMatch(text)) return null;
-    final value = double.tryParse(text);
-    if (value == null || value < 0 || value > 9999) return null;
-    return value;
+    return double.tryParse(text);
   }
 
   Future<void> _saveAttraction() async {
@@ -1662,29 +1709,77 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     double nonMalaysianSeniorFee = 0;
 
     if (!_isFreeEntry) {
-      final values = [
-        _validateFee(_malaysianAdultController),
-        _validateFee(_malaysianChildController),
-        _validateFee(_malaysianSeniorController),
-        _validateFee(_nonMalaysianAdultController),
-        _validateFee(_nonMalaysianChildController),
-        _validateFee(_nonMalaysianSeniorController),
+      final feeControllers = [
+        _malaysianAdultController,
+        _malaysianChildController,
+        _malaysianSeniorController,
+        _nonMalaysianAdultController,
+        _nonMalaysianChildController,
+        _nonMalaysianSeniorController,
       ];
 
-      if (values.any((value) => value == null)) {
+      if (feeControllers.any(
+            (controller) => !_isValidOptionalFee(controller),
+      )) {
         _showMessage(
-          'Please enter all 6 entry fees using valid values from RM 0.00 to RM 9,999.00.',
+          'Entry fees must be valid values from RM 0.00 to RM 9,999.00. '
+              'Price fields may be left blank when the same fee applies.',
           error: true,
         );
         return;
       }
 
-      malaysianAdultFee = values[0]!;
-      malaysianChildFee = values[1]!;
-      malaysianSeniorFee = values[2]!;
-      nonMalaysianAdultFee = values[3]!;
-      nonMalaysianChildFee = values[4]!;
-      nonMalaysianSeniorFee = values[5]!;
+      final myAdult = _optionalFee(_malaysianAdultController);
+      final myChild = _optionalFee(_malaysianChildController);
+      final mySenior = _optionalFee(_malaysianSeniorController);
+
+      final foreignAdult = _optionalFee(_nonMalaysianAdultController);
+      final foreignChild = _optionalFee(_nonMalaysianChildController);
+      final foreignSenior = _optionalFee(_nonMalaysianSeniorController);
+
+      if (myAdult == null &&
+          myChild == null &&
+          mySenior == null &&
+          foreignAdult == null &&
+          foreignChild == null &&
+          foreignSenior == null) {
+        _showMessage(
+          'Please enter at least one entry fee, or enable Free Entry.',
+          error: true,
+        );
+        return;
+      }
+
+      // Malaysian base price.
+      final baseMalaysian =
+          myAdult ??
+              myChild ??
+              mySenior ??
+              foreignAdult ??
+              foreignChild ??
+              foreignSenior ??
+              0;
+
+      malaysianAdultFee = baseMalaysian;
+      malaysianChildFee = myChild ?? baseMalaysian;
+      malaysianSeniorFee = mySenior ?? baseMalaysian;
+
+      // If no separate Non-Malaysian price is entered,
+      // reuse the equivalent Malaysian price.
+      nonMalaysianAdultFee =
+          foreignAdult ?? malaysianAdultFee;
+
+      nonMalaysianChildFee =
+          foreignChild ??
+              (foreignAdult != null
+                  ? nonMalaysianAdultFee
+                  : malaysianChildFee);
+
+      nonMalaysianSeniorFee =
+          foreignSenior ??
+              (foreignAdult != null
+                  ? nonMalaysianAdultFee
+                  : malaysianSeniorFee);
     }
 
     String? categoryName;

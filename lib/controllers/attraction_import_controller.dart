@@ -4,9 +4,8 @@ import 'package:flutter/material.dart';
 import '../services/geoapify_attraction_service.dart';
 
 class AttractionImportController extends ChangeNotifier {
-  static const String geoapifyApiKey = String.fromEnvironment(
-    'GEOAPIFY_API_KEY',
-  );
+  static const String geoapifyApiKey =
+  String.fromEnvironment('GEOAPIFY_API_KEY');
 
   final FirebaseFirestore _firestore;
   late final GeoapifyAttractionService _service;
@@ -26,8 +25,10 @@ class AttractionImportController extends ChangeNotifier {
 
   bool isSearching = false;
   bool isImporting = false;
+
   String? errorMessage;
   String? successMessage;
+
   String importStatus = 'Draft';
 
   bool get hasApiKey => _service.hasApiKey;
@@ -48,6 +49,7 @@ class AttractionImportController extends ChangeNotifier {
     } else {
       selectedPlaceIds.add(item.placeId);
     }
+
     notifyListeners();
   }
 
@@ -55,6 +57,7 @@ class AttractionImportController extends ChangeNotifier {
     selectedPlaceIds
       ..clear()
       ..addAll(results.map((e) => e.placeId));
+
     notifyListeners();
   }
 
@@ -63,23 +66,11 @@ class AttractionImportController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> search({
-    required String area,
-    String? state,
-    int radiusKm = 20,
+  Future<void> searchByState({
+    required String state,
   }) async {
-    final cleanArea = area.trim();
-
-    if (cleanArea.isEmpty) {
-      errorMessage = 'Please enter an area or city.';
-      successMessage = null;
-      notifyListeners();
-      return;
-    }
-
     if (!hasApiKey) {
-      errorMessage =
-          'Geoapify API key is missing. See the run command below.';
+      errorMessage = 'Geoapify API key is missing.';
       successMessage = null;
       notifyListeners();
       return;
@@ -91,11 +82,9 @@ class AttractionImportController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final fetched = await _service.searchAttractions(
-        area: cleanArea,
+      final fetched =
+      await _service.searchStateAttractions(
         state: state,
-        radiusMeters: radiusKm * 1000,
-        limit: 60,
       );
 
       results
@@ -103,10 +92,13 @@ class AttractionImportController extends ChangeNotifier {
         ..addAll(fetched);
 
       selectedPlaceIds.clear();
+
       successMessage =
-          '${results.length} attractions found around $cleanArea.';
+      '${results.length} attractions found across $state. '
+          'Higher-quality attractions are shown first.';
     } catch (e) {
-      errorMessage = e.toString().replaceFirst('Exception: ', '');
+      errorMessage =
+          e.toString().replaceFirst('Exception: ', '');
     } finally {
       isSearching = false;
       notifyListeners();
@@ -118,6 +110,7 @@ class AttractionImportController extends ChangeNotifier {
       errorMessage = 'Please select at least one attraction.';
       successMessage = null;
       notifyListeners();
+
       return const ImportSummary();
     }
 
@@ -131,8 +124,40 @@ class AttractionImportController extends ChangeNotifier {
     int failed = 0;
 
     try {
+      final categorySnapshot =
+      await _firestore.collection('categories').get();
+
+      final Map<String, _CategoryMatch> categoriesByName = {};
+
+      for (final doc in categorySnapshot.docs) {
+        final data = doc.data();
+
+        final status =
+        (data['status'] ?? 'Active').toString().trim();
+
+        if (status != 'Active') {
+          continue;
+        }
+
+        final name =
+        (data['name'] ?? '').toString().trim();
+
+        if (name.isEmpty) {
+          continue;
+        }
+
+        categoriesByName[_normalizeCategoryName(name)] =
+            _CategoryMatch(
+              id: doc.id,
+              name: name,
+            );
+      }
+
       final selected = results
-          .where((item) => selectedPlaceIds.contains(item.placeId))
+          .where(
+            (item) =>
+            selectedPlaceIds.contains(item.placeId),
+      )
           .toList();
 
       for (final item in selected) {
@@ -140,9 +165,9 @@ class AttractionImportController extends ChangeNotifier {
           final duplicate = await _firestore
               .collection('attractions')
               .where(
-                'sourcePlaceId',
-                isEqualTo: item.placeId,
-              )
+            'sourcePlaceId',
+            isEqualTo: item.placeId,
+          )
               .limit(1)
               .get();
 
@@ -151,59 +176,113 @@ class AttractionImportController extends ChangeNotifier {
             continue;
           }
 
-          final details = await _service.getPlaceDetails(item);
+          final categoryMatch =
+          _findMatchingCategory(
+            importedCategoryName: item.categoryName,
+            categories: categoriesByName,
+          );
+
+          if (categoryMatch == null) {
+            debugPrint(
+              'Import failed for "${item.name}": '
+                  'No active Firestore category matches '
+                  '"${item.categoryName}".',
+            );
+
+            failed++;
+            continue;
+          }
+
+          final details =
+          await _service.getPlaceDetails(item);
 
           final imageUrls = <String>[
             if (details.imageUrl.trim().isNotEmpty)
               details.imageUrl.trim(),
           ];
 
-          await _firestore.collection('attractions').add({
-            'name': item.name,
-            'categoryId': '',
-            'categoryName': item.categoryName,
-            'state': item.state,
-            'area': item.area,
-            'description': details.description,
-            'isFreeEntry': false,
+          final attractionDocument =
+          _firestore.collection('attractions').doc();
 
-            'malaysianAdultFee': 0.0,
-            'malaysianChildFee': 0.0,
-            'malaysianSeniorFee': 0.0,
+          final batch = _firestore.batch();
 
-            'nonMalaysianAdultFee': 0.0,
-            'nonMalaysianChildFee': 0.0,
-            'nonMalaysianSeniorFee': 0.0,
+          batch.set(
+            attractionDocument,
+            {
+              'name': item.name.trim(),
 
-            'openingTime': details.openingTime,
-            'closingTime': details.closingTime,
-            'recommendedDuration': '1 - 2 hours',
-            'address': item.address,
-            'phoneNumber': details.phoneNumber,
-            'facilities': details.facilities,
-            'highlights': details.highlights,
-            'imageUrls': imageUrls,
-            'coverImageUrl':
-                imageUrls.isNotEmpty ? imageUrls.first : '',
-            'status': importStatus,
-            'createdAt': FieldValue.serverTimestamp(),
+              // Real Firestore category relationship
+              'categoryId': categoryMatch.id,
+              'categoryName': categoryMatch.name,
 
-            'latitude': item.latitude,
-            'longitude': item.longitude,
-            'source': 'Geoapify',
-            'sourcePlaceId': item.placeId,
-            'sourceCategories': item.categories,
-            'importedAt': FieldValue.serverTimestamp(),
-          });
+              'state': item.state.trim(),
+              'area': item.area.trim(),
+              'description': details.description.trim(),
+
+              'isFreeEntry': false,
+
+              'malaysianAdultFee': 0.0,
+              'malaysianChildFee': 0.0,
+              'malaysianSeniorFee': 0.0,
+
+              'nonMalaysianAdultFee': 0.0,
+              'nonMalaysianChildFee': 0.0,
+              'nonMalaysianSeniorFee': 0.0,
+
+              'openingTime': details.openingTime.trim(),
+              'closingTime': details.closingTime.trim(),
+
+              'recommendedDuration': '1 - 2 hours',
+
+              'address': item.address.trim(),
+              'phoneNumber': details.phoneNumber.trim(),
+
+              'facilities': details.facilities,
+              'highlights': details.highlights,
+
+              'imageUrls': imageUrls,
+              'coverImageUrl':
+              imageUrls.isNotEmpty ? imageUrls.first : '',
+
+              'status': importStatus,
+              'createdAt': FieldValue.serverTimestamp(),
+
+              'latitude': item.latitude,
+              'longitude': item.longitude,
+
+              'source': 'Geoapify',
+              'sourcePlaceId': item.placeId,
+              'sourceCategories': item.categories,
+              'sourceQualityScore': item.qualityScore,
+              'sourceWebsite': details.website.trim(),
+              'importedAt': FieldValue.serverTimestamp(),
+            },
+          );
+
+          batch.update(
+            _firestore
+                .collection('categories')
+                .doc(categoryMatch.id),
+            {
+              'attractionCount': FieldValue.increment(1),
+            },
+          );
+
+          await batch.commit();
 
           imported++;
-        } catch (_) {
+        } catch (e) {
           failed++;
+
+          debugPrint(
+            'Import attraction "${item.name}" error: $e',
+          );
         }
       }
 
       successMessage =
-          '$imported imported, $skipped duplicate(s) skipped'
+      '$imported imported, '
+          '$skipped duplicate(s) skipped'
           '${failed > 0 ? ', $failed failed' : ''}.';
 
       return ImportSummary(
@@ -212,7 +291,9 @@ class AttractionImportController extends ChangeNotifier {
         failed: failed,
       );
     } catch (e) {
-      errorMessage = e.toString().replaceFirst('Exception: ', '');
+      errorMessage =
+          e.toString().replaceFirst('Exception: ', '');
+
       return ImportSummary(
         imported: imported,
         skipped: skipped,
@@ -223,6 +304,95 @@ class AttractionImportController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  _CategoryMatch? _findMatchingCategory({
+    required String importedCategoryName,
+    required Map<String, _CategoryMatch> categories,
+  }) {
+    final normalized =
+    _normalizeCategoryName(importedCategoryName);
+
+    final exact = categories[normalized];
+
+    if (exact != null) {
+      return exact;
+    }
+
+    final aliases = <String, List<String>>{
+      'culturalheritage': [
+        'cultureheritage',
+        'heritageculture',
+        'culturalhistorical',
+        'culturehistorical',
+        'heritage',
+      ],
+      'artsculture': [
+        'artculture',
+        'artsheritage',
+        'museumculture',
+        'museum',
+      ],
+      'naturescenic': [
+        'nature',
+        'natureoutdoor',
+        'natureadventure',
+        'scenicnature',
+        'naturalattraction',
+      ],
+      'religiouscultural': [
+        'religious',
+        'religionculture',
+        'religiousheritage',
+        'spiritualcultural',
+      ],
+      'touristattraction': [
+        'attraction',
+        'tourism',
+        'generaltourism',
+        'others',
+        'other',
+      ],
+    };
+
+    final possibleNames =
+        aliases[normalized] ?? const <String>[];
+
+    for (final alias in possibleNames) {
+      final match = categories[alias];
+
+      if (match != null) {
+        return match;
+      }
+    }
+
+    for (final entry in categories.entries) {
+      if (entry.key.contains(normalized) ||
+          normalized.contains(entry.key)) {
+        return entry.value;
+      }
+    }
+
+    return null;
+  }
+
+  String _normalizeCategoryName(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('&', 'and')
+        .replaceAll('and', '')
+        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+  }
+}
+
+class _CategoryMatch {
+  final String id;
+  final String name;
+
+  const _CategoryMatch({
+    required this.id,
+    required this.name,
+  });
 }
 
 class ImportSummary {
