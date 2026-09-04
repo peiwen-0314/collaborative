@@ -42,11 +42,44 @@ class _CulturalHeritagePageState extends State<CulturalHeritagePage> {
   void initState() {
     super.initState();
 
-    // TEST MODE:
-    // Show the nearby popup only ONCE for each full app run.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showNearbyPopupOncePerRun();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // First make sure every heritage place also exists as a
+      // normal Attraction and has attractionId linked back.
+      await _createMissingAttractionRecords();
+
+      if (!mounted) return;
+
+      // TEST MODE:
+      // Show the nearby popup only ONCE for each full app run.
+      await _showNearbyPopupOncePerRun();
     });
+  }
+
+  Future<void> _createMissingAttractionRecords() async {
+    try {
+      final result = await _firestoreService
+          .finalizeHeritageStructure();
+
+      debugPrint(
+        'Heritage structure finalized: $result',
+      );
+    } catch (error) {
+      debugPrint(
+        'Heritage structure migration failed: $error',
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            'Unable to finalize Cultural & Heritage records.\n$error',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _showNearbyPopupOncePerRun() async {

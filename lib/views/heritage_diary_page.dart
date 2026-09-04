@@ -52,6 +52,18 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
   @override
   void initState() {
     super.initState();
+
+    // When the diary first opens, actually filter to TODAY.
+    // Previously the timeline visually highlighted today while
+    // _selectedDate was still null, so entries from older dates
+    // (for example 4 Sep) were also shown.
+    final now = DateTime.now();
+    _selectedDate = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
     _loadDiary();
   }
 
@@ -113,8 +125,159 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
 
     if (confirmed != true) return;
 
-    await _storage.removeFromDiary(entry.attraction.id);
+    await _storage.removeFromDiary(entry.documentId);
     await _loadDiary();
+  }
+
+  Future<void> _editEntryDate(HeritageDiaryEntry entry) async {
+    final current = entry.savedAt.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+
+    final initialDate = DateTime(
+      current.year,
+      current.month,
+      current.day,
+    );
+
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate.isAfter(today)
+          ? today
+          : initialDate,
+      firstDate: DateTime(2020, 1, 1),
+      lastDate: today,
+      helpText: 'Edit diary date',
+      confirmText: 'Save Date',
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: green,
+              onPrimary: Colors.white,
+              onSurface: Colors.black87,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (pickedDate == null || !mounted) {
+      return;
+    }
+
+    // Keep the original saved time and only change the calendar date.
+    final updatedDateTime = DateTime(
+      pickedDate.year,
+      pickedDate.month,
+      pickedDate.day,
+      current.hour,
+      current.minute,
+      current.second,
+      current.millisecond,
+      current.microsecond,
+    );
+
+    final updated =
+    await _storage.updateDiarySavedAt(
+      entry.documentId,
+      updatedDateTime,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    if (!updated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.orange.shade700,
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            '${entry.attraction.name} is already saved '
+                'on ${pickedDate.day} '
+                '${_months[pickedDate.month - 1]} '
+                '${pickedDate.year}.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    await _loadDiary();
+
+    if (!mounted) {
+      return;
+    }
+
+    // If the diary was filtered to the old date, move the filter
+    // to the newly selected date so the edited entry remains visible.
+    setState(() {
+      _selectedDate = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+      );
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Diary date updated to '
+              '${pickedDate.day} '
+              '${_months[pickedDate.month - 1]} '
+              '${pickedDate.year}.',
+        ),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+
+  Future<void> _editStory(HeritageDiaryEntry entry) async {
+    final savedStory = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return _StoryEditorDialog(
+          attractionName: entry.attraction.name,
+          initialStory: entry.story,
+        );
+      },
+    );
+
+    if (savedStory == null || !mounted) {
+      return;
+    }
+
+    await _storage.updateDiaryStory(
+      entry.documentId,
+      savedStory,
+    );
+
+    await _loadDiary();
+
+    if (!mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          savedStory.isEmpty
+              ? 'Story removed.'
+              : 'Your story has been saved.',
+        ),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _openCalendar() async {
@@ -135,26 +298,427 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
       now.day,
     );
 
+    final firstAllowedDate = DateTime(2020, 1, 1);
+
     // Future dates are not allowed.
     if (initialDate.isAfter(today)) {
       initialDate = today;
     }
 
-    final picked = await showDatePicker(
+    if (initialDate.isBefore(firstAllowedDate)) {
+      initialDate = firstAllowedDate;
+    }
+
+    DateTime visibleMonth = DateTime(
+      initialDate.year,
+      initialDate.month,
+      1,
+    );
+
+    DateTime selectedInDialog = DateTime(
+      initialDate.year,
+      initialDate.month,
+      initialDate.day,
+    );
+
+    final picked = await showDialog<DateTime>(
       context: context,
-      initialDate: initialDate,
-      firstDate: DateTime(2020, 1, 1),
-      lastDate: today,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: green,
-              onPrimary: Colors.white,
-              onSurface: Colors.black87,
-            ),
-          ),
-          child: child!,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final firstDayOfMonth = DateTime(
+              visibleMonth.year,
+              visibleMonth.month,
+              1,
+            );
+
+            final daysInMonth = DateTime(
+              visibleMonth.year,
+              visibleMonth.month + 1,
+              0,
+            ).day;
+
+            // DateTime.weekday: Monday = 1 ... Sunday = 7.
+            final leadingEmptyCells = firstDayOfMonth.weekday - 1;
+
+            final totalGridCells =
+                ((leadingEmptyCells + daysInMonth + 6) ~/ 7) * 7;
+
+            final canGoPrevious = visibleMonth.isAfter(
+              DateTime(
+                firstAllowedDate.year,
+                firstAllowedDate.month,
+                1,
+              ),
+            );
+
+            final canGoNext =
+                visibleMonth.year < today.year ||
+                    (visibleMonth.year == today.year &&
+                        visibleMonth.month < today.month);
+
+            final selectedCount =
+            _heritageCountForDate(selectedInDialog);
+
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 28,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 390,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    16,
+                    16,
+                    16,
+                    14,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.calendar_month_outlined,
+                            color: green,
+                            size: 23,
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'Heritage Calendar',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () {
+                              Navigator.pop(dialogContext);
+                            },
+                            icon: const Icon(
+                              Icons.close,
+                              size: 20,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 4),
+
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'The number under each date shows how many heritage places are saved that day.',
+                          style: TextStyle(
+                            color: Colors.black54,
+                            fontSize: 9,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 13),
+
+                      Row(
+                        children: [
+                          IconButton(
+                            tooltip: 'Previous month',
+                            onPressed: canGoPrevious
+                                ? () {
+                              setDialogState(() {
+                                visibleMonth = DateTime(
+                                  visibleMonth.year,
+                                  visibleMonth.month - 1,
+                                  1,
+                                );
+                              });
+                            }
+                                : null,
+                            icon: const Icon(
+                              Icons.chevron_left,
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              '${_fullMonthName(visibleMonth.month)} '
+                                  '${visibleMonth.year}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.black87,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Next month',
+                            onPressed: canGoNext
+                                ? () {
+                              setDialogState(() {
+                                visibleMonth = DateTime(
+                                  visibleMonth.year,
+                                  visibleMonth.month + 1,
+                                  1,
+                                );
+                              });
+                            }
+                                : null,
+                            icon: const Icon(
+                              Icons.chevron_right,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 5),
+
+                      const Row(
+                        children: [
+                          _CalendarWeekdayLabel('Mon'),
+                          _CalendarWeekdayLabel('Tue'),
+                          _CalendarWeekdayLabel('Wed'),
+                          _CalendarWeekdayLabel('Thu'),
+                          _CalendarWeekdayLabel('Fri'),
+                          _CalendarWeekdayLabel('Sat'),
+                          _CalendarWeekdayLabel('Sun'),
+                        ],
+                      ),
+
+                      const SizedBox(height: 5),
+
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 7,
+                          childAspectRatio: 0.78,
+                        ),
+                        itemCount: totalGridCells,
+                        itemBuilder: (context, index) {
+                          final dayNumber =
+                              index - leadingEmptyCells + 1;
+
+                          if (dayNumber < 1 ||
+                              dayNumber > daysInMonth) {
+                            return const SizedBox.shrink();
+                          }
+
+                          final date = DateTime(
+                            visibleMonth.year,
+                            visibleMonth.month,
+                            dayNumber,
+                          );
+
+                          final disabled =
+                              date.isAfter(today) ||
+                                  date.isBefore(firstAllowedDate);
+
+                          final selected =
+                          _sameDay(date, selectedInDialog);
+
+                          final isToday = _sameDay(date, today);
+
+                          final heritageCount =
+                          _heritageCountForDate(date);
+
+                          return Padding(
+                            padding: const EdgeInsets.all(2),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(9),
+                              onTap: disabled
+                                  ? null
+                                  : () {
+                                setDialogState(() {
+                                  selectedInDialog = date;
+                                });
+                              },
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: selected
+                                      ? green
+                                      : Colors.white,
+                                  borderRadius:
+                                  BorderRadius.circular(9),
+                                  border: Border.all(
+                                    color: selected
+                                        ? green
+                                        : isToday
+                                        ? const Color(
+                                      0xFF8DBA8A,
+                                    )
+                                        : const Color(
+                                      0xFFE5E5E5,
+                                    ),
+                                    width: isToday && !selected
+                                        ? 1.4
+                                        : 1,
+                                  ),
+                                ),
+                                child: heritageCount == 0
+                                    ? Center(
+                                  child: Text(
+                                    '$dayNumber',
+                                    style: TextStyle(
+                                      color: disabled
+                                          ? Colors.black26
+                                          : selected
+                                          ? Colors.white
+                                          : Colors.black87,
+                                      fontSize: 11,
+                                      fontWeight:
+                                      FontWeight.w700,
+                                    ),
+                                  ),
+                                )
+                                    : Column(
+                                  mainAxisAlignment:
+                                  MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      '$dayNumber',
+                                      style: TextStyle(
+                                        color: disabled
+                                            ? Colors.black26
+                                            : selected
+                                            ? Colors.white
+                                            : Colors.black87,
+                                        fontSize: 11,
+                                        fontWeight:
+                                        FontWeight.w700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Container(
+                                      padding:
+                                      const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                        vertical: 1.5,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: selected
+                                            ? Colors.white.withValues(
+                                          alpha: 0.20,
+                                        )
+                                            : lightGreen,
+                                        borderRadius:
+                                        BorderRadius.circular(7),
+                                      ),
+                                      child: Text(
+                                        '$heritageCount',
+                                        style: TextStyle(
+                                          color: selected
+                                              ? Colors.white
+                                              : green,
+                                          fontSize: 7,
+                                          fontWeight:
+                                          FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 11,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color: lightGreen,
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.account_balance_outlined,
+                              color: green,
+                              size: 17,
+                            ),
+                            const SizedBox(width: 7),
+                            Expanded(
+                              child: Text(
+                                selectedCount == 0
+                                    ? 'No heritage place saved on '
+                                    '${selectedInDialog.day} '
+                                    '${_months[selectedInDialog.month - 1]} '
+                                    '${selectedInDialog.year}.'
+                                    : '$selectedCount '
+                                    '${selectedCount == 1 ? 'heritage place' : 'heritage places'} '
+                                    'saved on ${selectedInDialog.day} '
+                                    '${_months[selectedInDialog.month - 1]} '
+                                    '${selectedInDialog.year}.',
+                                style: const TextStyle(
+                                  color: green,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                Navigator.pop(dialogContext);
+                              },
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: green,
+                                side: const BorderSide(
+                                  color: green,
+                                ),
+                              ),
+                              child: const Text('Cancel'),
+                            ),
+                          ),
+                          const SizedBox(width: 9),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () {
+                                Navigator.pop(
+                                  dialogContext,
+                                  selectedInDialog,
+                                );
+                              },
+                              style: FilledButton.styleFrom(
+                                backgroundColor: green,
+                              ),
+                              child: const Text('View Date'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -201,6 +765,34 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
         curve: Curves.easeOutCubic,
       );
     });
+  }
+
+  int _heritageCountForDate(DateTime date) {
+    return _entries.where((entry) {
+      return _sameDay(
+        entry.savedAt.toLocal(),
+        date,
+      );
+    }).length;
+  }
+
+  String _fullMonthName(int month) {
+    const names = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+
+    return names[month - 1];
   }
 
   bool _sameDay(DateTime a, DateTime b) {
@@ -252,7 +844,8 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
           query.isEmpty ||
               attraction.name.toLowerCase().contains(query) ||
               attraction.city.toLowerCase().contains(query) ||
-              attraction.state.toLowerCase().contains(query);
+              attraction.state.toLowerCase().contains(query) ||
+              entry.story.toLowerCase().contains(query);
 
       final matchesDate =
           _selectedDate == null ||
@@ -348,7 +941,7 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'My Travel Diary',
+                  'My Heritage Diary',
                   style: TextStyle(
                     color: Colors.black87,
                     fontSize: 17,
@@ -680,14 +1273,15 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
 
   Widget _buildDiaryCard(HeritageDiaryEntry entry) {
     final attraction = entry.attraction;
+    final hasStory = entry.story.trim().isNotEmpty;
 
     return Material(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(11),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(11),
 
-        // Tap card = Heritage details
+        // Tap card = Heritage details.
         onTap: () {
           Navigator.push(
             context,
@@ -699,136 +1293,301 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
           );
         },
 
-        // Long press = remove (alternative to delete icon)
+        // Long press = remove.
         onLongPress: () => _removeEntry(entry),
 
         child: Container(
-          height: 92,
-          padding: const EdgeInsets.all(6),
+          padding: const EdgeInsets.all(9),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(11),
             border: Border.all(
               color: borderColor,
             ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x08000000),
+                blurRadius: 5,
+                offset: Offset(0, 2),
+              ),
+            ],
           ),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // IMAGE
+              // ============================================================
+              // LEFT: BIG IMAGE
+              // ============================================================
               ClipRRect(
-                borderRadius: BorderRadius.circular(7),
+                borderRadius: BorderRadius.circular(9),
                 child: HeritageImage(
                   imageUrl: attraction.imageUrl,
-                  width: 54,
-                  height: 80,
+                  width: 94,
+                  height: 136,
                 ),
               ),
 
-              const SizedBox(width: 9),
+              const SizedBox(width: 10),
 
-              // INFORMATION
+              // ============================================================
+              // RIGHT: TITLE + INFO + STORY
+              // ============================================================
               Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                child: Stack(
+                  clipBehavior: Clip.none,
                   children: [
-                    Row(
+                    Column(
+                      crossAxisAlignment:
+                      CrossAxisAlignment.start,
                       children: [
-                        Expanded(
+                        // Title only reserves space for the edit button.
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            right: 34,
+                          ),
                           child: Text(
                             attraction.name,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 9,
+                              fontSize: 10.8,
                               color: Colors.black,
                               fontWeight: FontWeight.w800,
+                              height: 1.15,
                             ),
                           ),
                         ),
 
-                        const SizedBox(width: 4),
+                        const SizedBox(height: 1),
 
-
-                      ],
-                    ),
-
-                    const SizedBox(height: 4),
-
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: lightGreen,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        attraction.category,
-                        style: const TextStyle(
-                          color: green,
-                          fontSize: 5.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.location_on_outlined,
-                          size: 8,
-                          color: Colors.black45,
-                        ),
-                        const SizedBox(width: 2),
-                        Expanded(
+                        // Type / Category.
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: lightGreen,
+                            borderRadius:
+                            BorderRadius.circular(5),
+                          ),
                           child: Text(
-                            _locationText(attraction),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            attraction.category,
                             style: const TextStyle(
-                              fontSize: 5.8,
-                              color: Colors.black54,
+                              color: green,
+                              fontSize: 7.4,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 4),
+
+                        // Location.
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.location_on_outlined,
+                              size: 11,
+                              color: Colors.black45,
+                            ),
+                            const SizedBox(width: 3),
+                            Expanded(
+                              child: Text(
+                                _locationText(attraction),
+                                maxLines: 1,
+                                overflow:
+                                TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 7.3,
+                                  color: Colors.black54,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 4),
+
+                        // Date.
+                        InkWell(
+                          borderRadius:
+                          BorderRadius.circular(6),
+                          onTap: () =>
+                              _editEntryDate(entry),
+                          child: Padding(
+                            padding:
+                            const EdgeInsets.symmetric(
+                              vertical: 1,
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.calendar_month_outlined,
+                                  size: 11,
+                                  color: green,
+                                ),
+                                const SizedBox(width: 3),
+                                Expanded(
+                                  child: Text(
+                                    _formatDateTime(
+                                      entry.savedAt,
+                                    ),
+                                    maxLines: 1,
+                                    overflow:
+                                    TextOverflow.ellipsis,
+                                    style:
+                                    const TextStyle(
+                                      fontSize: 7.1,
+                                      color:
+                                      Colors.black54,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 7),
+
+                        // Story.
+                        InkWell(
+                          borderRadius:
+                          BorderRadius.circular(8),
+                          onTap: () => _editStory(entry),
+                          child: Container(
+                            width: double.infinity,
+                            height: 74,
+                            padding:
+                            const EdgeInsets.fromLTRB(
+                              9,
+                              7,
+                              8,
+                              7,
+                            ),
+                            decoration: BoxDecoration(
+                              color:
+                              const Color(0xFFF4FAF3),
+                              borderRadius:
+                              BorderRadius.circular(8),
+                              border: Border.all(
+                                color:
+                                const Color(0xFFDDECDD),
+                              ),
+                            ),
+                            child: Stack(
+                              children: [
+                                // Header elements stay at the TOP.
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.auto_stories_outlined,
+                                        size: 14,
+                                        color: green,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          hasStory
+                                              ? 'My Story'
+                                              : 'Add My Story',
+                                          style: const TextStyle(
+                                            color: green,
+                                            fontSize: 8.0,
+                                            fontWeight:
+                                            FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        hasStory
+                                            ? 'Tap to view'
+                                            : 'Tap to add',
+                                        style: const TextStyle(
+                                          color: Colors.black38,
+                                          fontSize: 5.9,
+                                          fontWeight:
+                                          FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Icon(
+                                        hasStory
+                                            ? Icons.open_in_new_rounded
+                                            : Icons.add_circle_outline,
+                                        color: green,
+                                        size: 14,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                // Keep the actual story content around
+                                // its current middle position.
+                                Positioned(
+                                  left: 20,
+                                  right: 4,
+                                  top: 26,
+                                  child: Text(
+                                    hasStory
+                                        ? entry.story
+                                        : 'Write about what you saw, learned or enjoyed here...',
+                                    maxLines: 2,
+                                    overflow:
+                                    TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: hasStory
+                                          ? Colors.black54
+                                          : Colors.black38,
+                                      fontSize: 7.0,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
                       ],
                     ),
 
-                    const SizedBox(height: 4),
-
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.calendar_month_outlined,
-                          size: 8,
-                          color: Colors.black45,
-                        ),
-                        const SizedBox(width: 2),
-                        Expanded(
-                          child: Text(
-                            _formatDateTime(entry.savedAt),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 5.4,
-                              color: Colors.black54,
+                    // Overlay edit button so it does not create
+                    // extra vertical space under the title.
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: Tooltip(
+                        message: 'Edit diary date',
+                        child: InkWell(
+                          borderRadius:
+                          BorderRadius.circular(20),
+                          onTap: () =>
+                              _editEntryDate(entry),
+                          child: Container(
+                            width: 27,
+                            height: 27,
+                            decoration:
+                            const BoxDecoration(
+                              color: lightGreen,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.edit_calendar_outlined,
+                              size: 14,
+                              color: green,
                             ),
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   ],
                 ),
               ),
-
-              const SizedBox(width: 6),
-
-              // MAP PREVIEW
-              _buildMiniMap(attraction),
             ],
           ),
         ),
@@ -973,6 +1732,468 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+
+class _StoryEditorDialog extends StatefulWidget {
+  const _StoryEditorDialog({
+    required this.attractionName,
+    required this.initialStory,
+  });
+
+  final String attractionName;
+  final String initialStory;
+
+  @override
+  State<_StoryEditorDialog> createState() =>
+      _StoryEditorDialogState();
+}
+
+class _StoryEditorDialogState
+    extends State<_StoryEditorDialog> {
+  static const Color green = Color(0xFF2E7D32);
+  static const Color lightGreen = Color(0xFFE6F4E5);
+
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  // Always open in view mode first.
+  bool _isEditing = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = TextEditingController(
+      text: widget.initialStory,
+    );
+
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _startEditing() {
+    setState(() {
+      _isEditing = true;
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _focusNode.requestFocus();
+      }
+    });
+  }
+
+  void _backToView() {
+    _focusNode.unfocus();
+
+    setState(() {
+      // Discard unsaved changes.
+      _controller.text = widget.initialStory;
+      _isEditing = false;
+    });
+  }
+
+  void _save() {
+    Navigator.pop(
+      context,
+      _controller.text.trim(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasStory = widget.initialStory.trim().isNotEmpty;
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(
+        horizontal: 22,
+        vertical: 24,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: 420,
+        ),
+        child: SingleChildScrollView(
+          keyboardDismissBehavior:
+          ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.fromLTRB(
+            18,
+            18,
+            18,
+            16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment:
+            CrossAxisAlignment.start,
+            children: [
+              // ==========================================================
+              // HEADER
+              // ==========================================================
+              Row(
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: const BoxDecoration(
+                      color: lightGreen,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.auto_stories_outlined,
+                      color: green,
+                      size: 22,
+                    ),
+                  ),
+
+                  const SizedBox(width: 11),
+
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                      CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'My Story',
+                          style: TextStyle(
+                            color: Colors.black87,
+                            fontSize: 17,
+                            fontWeight:
+                            FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.attractionName,
+                          maxLines: 1,
+                          overflow:
+                          TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.black45,
+                            fontSize: 9,
+                            fontWeight:
+                            FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(width: 6),
+
+                  // X closes the popup without saving unsaved edits.
+                  InkWell(
+                    onTap: () =>
+                        Navigator.pop(context),
+                    customBorder:
+                    const CircleBorder(),
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color:
+                        const Color(0xFFF3F3F3),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color:
+                          const Color(0xFFE2E2E2),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.close_rounded,
+                        size: 17,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 15),
+
+              // ==========================================================
+              // VIEW MODE - this is shown FIRST
+              // ==========================================================
+              if (!_isEditing) ...[
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Your Experience',
+                        style: TextStyle(
+                          color: Colors.black87,
+                          fontSize: 11,
+                          fontWeight:
+                          FontWeight.w700,
+                        ),
+                      ),
+                    ),
+
+                    FilledButton.icon(
+                      onPressed: _startEditing,
+                      style:
+                      FilledButton.styleFrom(
+                        backgroundColor: green,
+                        padding:
+                        const EdgeInsets.symmetric(
+                          horizontal: 13,
+                          vertical: 8,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize:
+                        MaterialTapTargetSize
+                            .shrinkWrap,
+                      ),
+                      icon: Icon(
+                        hasStory
+                            ? Icons.edit_outlined
+                            : Icons.add,
+                        size: 14,
+                      ),
+                      label: Text(
+                        hasStory
+                            ? 'Edit'
+                            : 'Add Story',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight:
+                          FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 10),
+
+                Container(
+                  width: double.infinity,
+                  constraints:
+                  const BoxConstraints(
+                    minHeight: 105,
+                  ),
+                  padding:
+                  const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color:
+                    const Color(0xFFF8FBF8),
+                    borderRadius:
+                    BorderRadius.circular(12),
+                    border: Border.all(
+                      color:
+                      const Color(0xFFDCE7DC),
+                    ),
+                  ),
+                  child: hasStory
+                      ? Text(
+                    widget.initialStory,
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontSize: 11,
+                      height: 1.5,
+                    ),
+                  )
+                      : const Center(
+                    child: Column(
+                      mainAxisSize:
+                      MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons
+                              .auto_stories_outlined,
+                          color:
+                          Colors.black26,
+                          size: 28,
+                        ),
+                        SizedBox(height: 7),
+                        Text(
+                          'No story added yet.',
+                          style: TextStyle(
+                            color:
+                            Colors.black38,
+                            fontSize: 10,
+                            fontWeight:
+                            FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(height: 3),
+                        Text(
+                          'Tap Add Story to write about your experience.',
+                          textAlign:
+                          TextAlign.center,
+                          style: TextStyle(
+                            color:
+                            Colors.black38,
+                            fontSize: 8.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+
+              // ==========================================================
+              // EDIT MODE - only shown AFTER pressing Edit/Add Story
+              // ==========================================================
+              if (_isEditing) ...[
+                const Text(
+                  'Edit your experience',
+                  style: TextStyle(
+                    color: Colors.black87,
+                    fontSize: 11,
+                    fontWeight:
+                    FontWeight.w700,
+                  ),
+                ),
+
+                const SizedBox(height: 7),
+
+                TextField(
+                  controller: _controller,
+                  focusNode: _focusNode,
+                  minLines: 4,
+                  maxLines: 7,
+                  maxLength: 500,
+                  textCapitalization:
+                  TextCapitalization.sentences,
+                  textInputAction:
+                  TextInputAction.newline,
+                  decoration: InputDecoration(
+                    hintText:
+                    'What did you see, learn, feel, or enjoy here?',
+                    hintStyle: const TextStyle(
+                      color: Colors.black38,
+                      fontSize: 10,
+                    ),
+                    filled: true,
+                    fillColor:
+                    const Color(0xFFF8FBF8),
+                    contentPadding:
+                    const EdgeInsets.all(13),
+                    enabledBorder:
+                    OutlineInputBorder(
+                      borderRadius:
+                      BorderRadius.circular(
+                        12,
+                      ),
+                      borderSide:
+                      const BorderSide(
+                        color:
+                        Color(0xFFDCE7DC),
+                      ),
+                    ),
+                    focusedBorder:
+                    OutlineInputBorder(
+                      borderRadius:
+                      BorderRadius.circular(
+                        12,
+                      ),
+                      borderSide:
+                      const BorderSide(
+                        color: green,
+                        width: 1.4,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 4),
+
+                Row(
+                  children: [
+                    if (widget.initialStory
+                        .trim()
+                        .isNotEmpty)
+                      TextButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _controller.clear();
+                          });
+                        },
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          size: 16,
+                        ),
+                        label:
+                        const Text('Clear'),
+                        style:
+                        TextButton.styleFrom(
+                          foregroundColor:
+                          Colors.black54,
+                        ),
+                      ),
+
+                    const Spacer(),
+
+                    TextButton(
+                      onPressed: _backToView,
+                      child:
+                      const Text('Back'),
+                    ),
+
+                    const SizedBox(width: 6),
+
+                    FilledButton.icon(
+                      onPressed: _save,
+                      style:
+                      FilledButton.styleFrom(
+                        backgroundColor: green,
+                        padding:
+                        const EdgeInsets.symmetric(
+                          horizontal: 15,
+                          vertical: 11,
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.check,
+                        size: 16,
+                      ),
+                      label:
+                      const Text('Save Story'),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CalendarWeekdayLabel extends StatelessWidget {
+  const _CalendarWeekdayLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.black45,
+          fontSize: 8,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

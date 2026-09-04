@@ -99,7 +99,7 @@ class MyApp extends StatelessWidget {
 
       // Temporary: directly open Admin Login
       // home: const LoginPage(),
-      home: const AdminLoginPage(),
+      home: const LoginPage(),
       //home: const TransportationPage(),
     );
   }

@@ -186,19 +186,54 @@ class _AiAttractionRecognitionPageState
 
     if (attraction == null) return;
 
-    await _storage.addToDiary(attraction);
+    try {
+      final added = await _storage.addToDiary(
+        attraction,
+      );
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: green,
-        behavior: SnackBarBehavior.floating,
-        content: Text(
-          '${attraction.name} added to your Travel Journey.',
+      // Remove any old message before showing the new one.
+      ScaffoldMessenger.of(context)
+          .hideCurrentSnackBar();
+
+      if (added) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: green,
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              '${attraction.name} added to your Heritage Journey.',
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.orange.shade700,
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              '${attraction.name} is already in your Travel Journey for today.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+          .hideCurrentSnackBar();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            'Unable to add ${attraction.name} to your Travel Journey.\n$error',
+          ),
         ),
-      ),
-    );
+      );
+    }
   }
 
   // ============================================================
@@ -788,7 +823,7 @@ class _AiAttractionRecognitionPageState
               ),
               onPressed: _addToJourney,
               child: const Text(
-                'Add To Travel Journey',
+                'Add To Heritage Journey',
                 style: TextStyle(
                   fontSize: 8,
                   fontWeight:

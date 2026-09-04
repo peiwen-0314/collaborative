@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../models/heritage_attraction.dart';
+import 'heritage_firestore_service.dart';
 
 class AdminHeritageRecord {
   const AdminHeritageRecord({
@@ -20,62 +23,133 @@ class AdminHeritageService {
   AdminHeritageService({
     FirebaseFirestore? firestore,
     FirebaseStorage? storage,
-  })  : _firestore = firestore ?? FirebaseFirestore.instance,
-        _storage = storage ?? FirebaseStorage.instance;
+    HeritageFirestoreService? heritageService,
+  })  : _firestore =
+      firestore ?? FirebaseFirestore.instance,
+        _storage =
+            storage ?? FirebaseStorage.instance,
+        _heritageService =
+            heritageService ??
+                HeritageFirestoreService(
+                  firestore: firestore,
+                );
 
   final FirebaseFirestore _firestore;
   final FirebaseStorage _storage;
+  final HeritageFirestoreService
+  _heritageService;
 
-  CollectionReference<Map<String, dynamic>> get _collection =>
-      _firestore.collection('heritage_attractions');
-
-  Stream<List<AdminHeritageRecord>> watchHeritagePlaces() {
-    return _collection.snapshots().map((snapshot) {
-      final records = snapshot.docs.map((doc) {
-        final data = doc.data();
-
-        DateTime? lastUpdated;
-        final rawUpdated = data['lastUpdated'];
-
-        if (rawUpdated is Timestamp) {
-          lastUpdated = rawUpdated.toDate();
-        }
-
-        return AdminHeritageRecord(
-          attraction: HeritageAttraction.fromFirestore(
-            doc.id,
-            data,
-          ),
-          status: data['status']?.toString() ?? 'Active',
-          lastUpdated: lastUpdated,
-        );
-      }).toList();
-
-      records.sort(
-            (a, b) => a.attraction.name
-            .toLowerCase()
-            .compareTo(b.attraction.name.toLowerCase()),
+  CollectionReference<Map<String, dynamic>>
+  get _heritageCollection =>
+      _firestore.collection(
+        'heritage_attractions',
       );
 
-      return records;
-    });
+  CollectionReference<Map<String, dynamic>>
+  get _attractionCollection =>
+      _firestore.collection(
+        'attractions',
+      );
+
+  // ============================================================
+  // WATCH JOINED ADMIN RECORDS
+  // ============================================================
+
+  Stream<List<AdminHeritageRecord>>
+  watchHeritagePlaces() {
+    return _heritageService
+        .watchAttractions()
+        .asyncMap(
+          (attractions) async {
+        final records =
+        <AdminHeritageRecord>[];
+
+        for (final attraction
+        in attractions) {
+          final snapshots =
+          await Future.wait([
+            _attractionCollection
+                .doc(attraction.id)
+                .get(),
+            _heritageCollection
+                .doc(
+              attraction
+                  .heritageDocumentId,
+            )
+                .get(),
+          ]);
+
+          final attractionData =
+              snapshots[0].data() ??
+                  <String, dynamic>{};
+
+          final heritageData =
+              snapshots[1].data() ??
+                  <String, dynamic>{};
+
+          DateTime? lastUpdated;
+
+          final rawUpdated =
+              heritageData['lastUpdated'] ??
+                  attractionData[
+                  'updatedAt'];
+
+          if (rawUpdated is Timestamp) {
+            lastUpdated =
+                rawUpdated.toDate();
+          }
+
+          records.add(
+            AdminHeritageRecord(
+              attraction:
+              attraction,
+              status:
+              attractionData[
+              'status']
+                  ?.toString() ??
+                  'Active',
+              lastUpdated:
+              lastUpdated,
+            ),
+          );
+        }
+
+        records.sort(
+              (a, b) => a.attraction.name
+              .toLowerCase()
+              .compareTo(
+            b.attraction.name
+                .toLowerCase(),
+          ),
+        );
+
+        return records;
+      },
+    );
   }
 
   Future<String> generateNextId() async {
-    final snapshot = await _collection.get();
+    final snapshot =
+    await _heritageCollection.get();
 
     var highest = 0;
 
     for (final doc in snapshot.docs) {
-      final match = RegExp(r'^H(\d+)$').firstMatch(doc.id);
+      final match =
+      RegExp(r'^H(\d+)$')
+          .firstMatch(doc.id);
 
       if (match == null) {
         continue;
       }
 
-      final number = int.tryParse(match.group(1) ?? '');
+      final number =
+      int.tryParse(
+        match.group(1) ?? '',
+      );
 
-      if (number != null && number > highest) {
+      if (number != null &&
+          number > highest) {
         highest = number;
       }
     }
@@ -87,85 +161,727 @@ class AdminHeritageService {
     required String documentId,
     required XFile image,
   }) async {
-    final bytes = await image.readAsBytes();
+    final bytes =
+    await image.readAsBytes();
 
-    final contentType = _contentTypeFromName(image.name);
+    final contentType =
+    _contentTypeFromName(
+      image.name,
+    );
 
-    final imageRef = _storage.ref(
+    final imageRef =
+    _storage.ref(
       'heritage/$documentId/main_image',
     );
 
     await imageRef.putData(
       bytes,
       SettableMetadata(
-        contentType: contentType,
+        contentType:
+        contentType,
       ),
     );
 
     return imageRef.getDownloadURL();
   }
 
+  // ============================================================
+  // ADD
+  //
+  // The form can continue sending one map. This service splits it:
+  // - GENERAL fields -> attractions
+  // - HERITAGE fields -> heritage_attractions
+  // ============================================================
+
   Future<String> addHeritagePlace({
     required Map<String, dynamic> data,
     required XFile image,
   }) async {
-    final documentId = await generateNextId();
+    final heritageDocumentId =
+    await generateNextId();
 
-    final imageUrl = await uploadHeritageImage(
-      documentId: documentId,
+    final imageUrl =
+    await uploadHeritageImage(
+      documentId:
+      heritageDocumentId,
       image: image,
     );
 
-    await _collection.doc(documentId).set({
-      ...data,
-      'imageUrl': imageUrl,
-      'status': data['status'] ?? 'Active',
-      'createdAt': FieldValue.serverTimestamp(),
-      'lastUpdated': FieldValue.serverTimestamp(),
-    });
+    final attractionRef =
+    _attractionCollection.doc(
+      heritageDocumentId,
+    );
 
-    return documentId;
+    final heritageRef =
+    _heritageCollection.doc(
+      heritageDocumentId,
+    );
+
+    final batch =
+    _firestore.batch();
+
+    batch.set(
+      attractionRef,
+      _buildGeneralAttractionMap(
+        data: data,
+        imageUrl: imageUrl,
+        sourcePlaceId:
+        heritageDocumentId,
+        isNew: true,
+      ),
+      SetOptions(merge: true),
+    );
+
+    batch.set(
+      heritageRef,
+      _buildHeritageMap(
+        data: data,
+        attractionId:
+        attractionRef.id,
+        isNew: true,
+      ),
+      SetOptions(merge: true),
+    );
+
+    await batch.commit();
+
+    return heritageDocumentId;
   }
 
+  // ============================================================
+  // UPDATE
+  //
+  // IMPORTANT: [heritageDocumentId] is the document ID from
+  // heritage_attractions, NOT the master Attraction ID.
+  // This matters for Kek Lok Si, whose master Attraction ID is
+  // different from H005.
+  // ============================================================
+
   Future<void> updateHeritagePlace({
-    required String id,
+    String? heritageDocumentId,
+    String? id,
     required Map<String, dynamic> data,
     XFile? newImage,
   }) async {
+    final cleanHeritageId =
+    (heritageDocumentId ?? id ?? '')
+        .trim();
+
+    if (cleanHeritageId.isEmpty) {
+      throw ArgumentError(
+        'heritageDocumentId is required.',
+      );
+    }
+
+    final heritageSnapshot =
+    await _heritageCollection
+        .doc(cleanHeritageId)
+        .get();
+
+    if (!heritageSnapshot.exists) {
+      throw StateError(
+        'Heritage record $cleanHeritageId does not exist.',
+      );
+    }
+
+    final heritageData =
+        heritageSnapshot.data() ??
+            <String, dynamic>{};
+
+    final attractionId =
+    heritageData['attractionId']
+        ?.toString()
+        .trim()
+        .isNotEmpty ==
+        true
+        ? heritageData[
+    'attractionId']
+        .toString()
+        .trim()
+        : cleanHeritageId;
+
     String? imageUrl;
 
     if (newImage != null) {
-      imageUrl = await uploadHeritageImage(
-        documentId: id,
+      imageUrl =
+      await uploadHeritageImage(
+        documentId:
+        cleanHeritageId,
         image: newImage,
       );
     }
 
-    await _collection.doc(id).update({
-      ...data,
-      if (imageUrl != null) 'imageUrl': imageUrl,
-      'lastUpdated': FieldValue.serverTimestamp(),
-    });
+    final batch =
+    _firestore.batch();
+
+    batch.set(
+      _attractionCollection.doc(
+        attractionId,
+      ),
+      _buildGeneralAttractionMap(
+        data: data,
+        imageUrl: imageUrl,
+        sourcePlaceId:
+        cleanHeritageId,
+        isNew: false,
+      ),
+      SetOptions(merge: true),
+    );
+
+    batch.set(
+      _heritageCollection.doc(
+        cleanHeritageId,
+      ),
+      _buildHeritageMap(
+        data: data,
+        attractionId:
+        attractionId,
+        isNew: false,
+      ),
+      SetOptions(merge: true),
+    );
+
+    await batch.commit();
   }
 
-  Future<void> deleteHeritagePlace(String id) async {
-    // Delete the main Firebase Storage image if it exists.
+
+  // ============================================================
+  // DELETE
+  //
+  // Delete only the specialised heritage extension.
+  // The master Attraction remains in the general Attractions module.
+  // ============================================================
+
+  Future<void> deleteHeritagePlace(
+      String heritageDocumentId,
+      ) async {
+    final cleanHeritageId =
+    heritageDocumentId.trim();
+
+    if (cleanHeritageId.isEmpty) {
+      return;
+    }
+
     try {
-      await _storage.ref(
-        'heritage/$id/main_image',
-      ).delete();
+      await _storage
+          .ref(
+        'heritage/$cleanHeritageId/main_image',
+      )
+          .delete();
     } on FirebaseException catch (error) {
-      // If there is no Storage image, still allow Firestore deletion.
-      if (error.code != 'object-not-found') {
+      if (error.code !=
+          'object-not-found') {
         rethrow;
       }
     }
 
-    await _collection.doc(id).delete();
+    await _heritageCollection
+        .doc(cleanHeritageId)
+        .delete();
   }
 
-  String _contentTypeFromName(String fileName) {
-    final name = fileName.toLowerCase();
+  // ============================================================
+  // SPLIT MAPS
+  // ============================================================
+
+  Map<String, dynamic>
+  _buildGeneralAttractionMap({
+    required Map<String, dynamic> data,
+    required String? imageUrl,
+    required String sourcePlaceId,
+    required bool isNew,
+  }) {
+    final parsedHours =
+    _splitOpeningHours(
+      data['openingHours']
+          ?.toString() ??
+          '',
+    );
+
+    final result =
+    <String, dynamic>{
+      'name':
+      data['name']
+          ?.toString()
+          .trim() ??
+          '',
+      'area':
+      data['city']
+          ?.toString()
+          .trim() ??
+          '',
+      'state':
+      data['state']
+          ?.toString()
+          .trim() ??
+          '',
+      'categoryId':
+      HeritageFirestoreService
+          .culturalHeritageCategoryId,
+      'categoryName':
+      HeritageFirestoreService
+          .culturalHeritageCategoryName,
+      'description':
+      data['shortDescription']
+          ?.toString()
+          .trim() ??
+          '',
+      'latitude':
+      _asDouble(
+        data['latitude'],
+      ),
+      'longitude':
+      _asDouble(
+        data['longitude'],
+      ),
+      'openingTime':
+      parsedHours.$1,
+      'closingTime':
+      parsedHours.$2,
+      'recommendedDuration':
+      _normalizeDuration(
+        data['recommendedTime']
+            ?.toString() ??
+            '',
+      ),
+      'status':
+      data['status']
+          ?.toString()
+          .trim()
+          .isNotEmpty ==
+          true
+          ? data['status']
+          .toString()
+          .trim()
+          : 'Active',
+      'updatedAt':
+      FieldValue.serverTimestamp(),
+    };
+
+    // Only write these optional general fields when the form
+    // actually supplies them. This prevents an edit from erasing
+    // richer information already stored in the master Attraction.
+    if (data.containsKey('address')) {
+      result['address'] =
+          data['address']
+              ?.toString()
+              .trim() ??
+              '';
+    }
+
+    if (data.containsKey(
+      'phoneNumber',
+    )) {
+      result['phoneNumber'] =
+          data['phoneNumber']
+              ?.toString()
+              .trim() ??
+              '';
+    }
+
+    if (imageUrl != null &&
+        imageUrl.trim().isNotEmpty) {
+      result['coverImageUrl'] =
+          imageUrl.trim();
+      result['imageUrls'] =
+      <String>[
+        imageUrl.trim(),
+      ];
+    }
+
+    if (isNew) {
+      final heritageType =
+      data['heritageType']
+          ?.toString()
+          .trim()
+          .isNotEmpty ==
+          true
+          ? data['heritageType']
+          .toString()
+          .trim()
+          : data['category']
+          ?.toString()
+          .trim()
+          .isNotEmpty ==
+          true
+          ? data['category']
+          .toString()
+          .trim()
+          : 'Heritage Site';
+
+      result.addAll({
+        'address':
+        data['address']
+            ?.toString()
+            .trim() ??
+            '',
+        'phoneNumber':
+        data['phoneNumber']
+            ?.toString()
+            .trim() ??
+            '',
+        'isFreeEntry': true,
+        'malaysianAdultFee': 0,
+        'malaysianChildFee': 0,
+        'malaysianSeniorFee': 0,
+        'nonMalaysianAdultFee': 0,
+        'nonMalaysianChildFee': 0,
+        'nonMalaysianSeniorFee': 0,
+        'facilities':
+        const <String>[],
+        'highlights':
+        <String>[heritageType],
+        'sourceCategories':
+        const <String>[
+          'cultural_heritage',
+          'heritage',
+        ],
+        'sourcePlaceId':
+        sourcePlaceId,
+        'source':
+        'EcoTravel Heritage Admin',
+        'sourceQualityScore': 0,
+        'sourceWebsite': '',
+        'createdAt':
+        FieldValue.serverTimestamp(),
+        'importedAt':
+        FieldValue.serverTimestamp(),
+      });
+    }
+
+    return result;
+  }
+
+  Map<String, dynamic>
+  _buildHeritageMap({
+    required Map<String, dynamic> data,
+    required String attractionId,
+    required bool isNew,
+  }) {
+    final heritageType =
+    data['heritageType']
+        ?.toString()
+        .trim()
+        .isNotEmpty ==
+        true
+        ? data['heritageType']
+        .toString()
+        .trim()
+        : data['category']
+        ?.toString()
+        .trim()
+        .isNotEmpty ==
+        true
+        ? data['category']
+        .toString()
+        .trim()
+        : 'Heritage Site';
+
+    final result =
+    <String, dynamic>{
+      'attractionId':
+      attractionId,
+      'schemaVersion': 2,
+      'heritageType':
+      heritageType,
+      'aliases':
+      _asStringList(
+        data['aliases'],
+      ),
+      'history':
+      data['history']
+          ?.toString()
+          .trim() ??
+          '',
+      'culturalSignificance':
+      data['culturalSignificance']
+          ?.toString()
+          .trim() ??
+          '',
+      'visitorEtiquette':
+      data['visitorEtiquette']
+          ?.toString()
+          .trim() ??
+          '',
+      'visitorEtiquetteItems':
+      _asStringList(
+        data[
+        'visitorEtiquetteItems'],
+      ),
+      'sustainabilityTip':
+      data['sustainabilityTip']
+          ?.toString()
+          .trim() ??
+          '',
+      'bestTime':
+      data['bestTime']
+          ?.toString()
+          .trim() ??
+          '',
+      'yearBuilt':
+      data['yearBuilt']
+          ?.toString()
+          .trim() ??
+          '',
+      'architecturalStyle':
+      data['architecturalStyle']
+          ?.toString()
+          .trim() ??
+          '',
+      'heritageStatus':
+      data['heritageStatus']
+          ?.toString()
+          .trim() ??
+          '',
+      'conservationGuidelines':
+      _asStringList(
+        data[
+        'conservationGuidelines'],
+      ),
+      'dressCode':
+      _asStringList(
+        data['dressCode'],
+      ),
+      'photographyRestrictions':
+      _asStringList(
+        data[
+        'photographyRestrictions'],
+      ),
+      'preservationPractices':
+      _asStringList(
+        data[
+        'preservationPractices'],
+      ),
+      'audioEnglish':
+      data['audioEnglish']
+          ?.toString()
+          .trim() ??
+          '',
+      'audioMalay':
+      data['audioMalay']
+          ?.toString()
+          .trim() ??
+          '',
+      'audioChinese':
+      data['audioChinese']
+          ?.toString()
+          .trim() ??
+          '',
+      if (data.containsKey(
+        'stampImageUrl',
+      ))
+        'stampImageUrl':
+        data['stampImageUrl']
+            ?.toString()
+            .trim() ??
+            '',
+      'lastUpdated':
+      FieldValue.serverTimestamp(),
+
+      // Remove old duplicate general fields if an old admin form
+      // or record still contains them.
+      'name':
+      FieldValue.delete(),
+      'address':
+      FieldValue.delete(),
+      'area':
+      FieldValue.delete(),
+      'city':
+      FieldValue.delete(),
+      'state':
+      FieldValue.delete(),
+      'category':
+      FieldValue.delete(),
+      'categoryId':
+      FieldValue.delete(),
+      'categoryName':
+      FieldValue.delete(),
+      'latitude':
+      FieldValue.delete(),
+      'longitude':
+      FieldValue.delete(),
+      'imageUrl':
+      FieldValue.delete(),
+      'coverImageUrl':
+      FieldValue.delete(),
+      'imageUrls':
+      FieldValue.delete(),
+      'openingHours':
+      FieldValue.delete(),
+      'openingTime':
+      FieldValue.delete(),
+      'closingTime':
+      FieldValue.delete(),
+      'shortDescription':
+      FieldValue.delete(),
+      'description':
+      FieldValue.delete(),
+      'recommendedTime':
+      FieldValue.delete(),
+      'recommendedDuration':
+      FieldValue.delete(),
+      'phoneNumber':
+      FieldValue.delete(),
+      'facilities':
+      FieldValue.delete(),
+      'highlights':
+      FieldValue.delete(),
+      'isFreeEntry':
+      FieldValue.delete(),
+      'malaysianAdultFee':
+      FieldValue.delete(),
+      'malaysianChildFee':
+      FieldValue.delete(),
+      'malaysianSeniorFee':
+      FieldValue.delete(),
+      'nonMalaysianAdultFee':
+      FieldValue.delete(),
+      'nonMalaysianChildFee':
+      FieldValue.delete(),
+      'nonMalaysianSeniorFee':
+      FieldValue.delete(),
+      'status':
+      FieldValue.delete(),
+    };
+
+    if (isNew) {
+      result['createdAt'] =
+          FieldValue.serverTimestamp();
+    }
+
+    return result;
+  }
+
+  // ============================================================
+  // HELPERS
+  // ============================================================
+
+  double _asDouble(dynamic value) {
+    if (value is num) {
+      return value.toDouble();
+    }
+
+    return double.tryParse(
+      value?.toString() ?? '',
+    ) ??
+        0.0;
+  }
+
+  List<String> _asStringList(
+      dynamic value,
+      ) {
+    if (value is! List) {
+      return const <String>[];
+    }
+
+    return value
+        .map(
+          (item) =>
+          item.toString().trim(),
+    )
+        .where(
+          (item) => item.isNotEmpty,
+    )
+        .toList();
+  }
+
+  (String, String) _splitOpeningHours(
+      String value,
+      ) {
+    final normalized =
+    value
+        .trim()
+        .replaceAll('–', '-')
+        .replaceAll('—', '-');
+
+    if (normalized.isEmpty) {
+      return ('', '');
+    }
+
+    final parts = normalized
+        .split('-')
+        .map(
+          (item) => item.trim(),
+    )
+        .where(
+          (item) => item.isNotEmpty,
+    )
+        .toList();
+
+    if (parts.length >= 2) {
+      return (
+      _normalizeClockTime(
+        parts.first,
+      ),
+      _normalizeClockTime(
+        parts.sublist(1).join('-'),
+      ),
+      );
+    }
+
+    return (
+    _normalizeClockTime(
+      normalized,
+    ),
+    '',
+    );
+  }
+
+  String _normalizeClockTime(
+      String value,
+      ) {
+    final clean = value.trim();
+
+    final match =
+    RegExp(
+      r'^(\d{1,2}):(\d{2})$',
+    ).firstMatch(clean);
+
+    if (match == null) {
+      return clean;
+    }
+
+    final hour =
+    int.tryParse(
+      match.group(1) ?? '',
+    );
+
+    final minute =
+    int.tryParse(
+      match.group(2) ?? '',
+    );
+
+    if (hour == null ||
+        minute == null) {
+      return clean;
+    }
+
+    return '${hour.toString().padLeft(2, '0')}:'
+        '${minute.toString().padLeft(2, '0')}';
+  }
+
+  String _normalizeDuration(
+      String value,
+      ) {
+    return value
+        .trim()
+        .replaceAll('–', ' - ')
+        .replaceAll('—', ' - ')
+        .replaceAll(
+      RegExp(r'\s*-\s*'),
+      ' - ',
+    )
+        .replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    );
+  }
+
+  String _contentTypeFromName(
+      String fileName,
+      ) {
+    final name =
+    fileName.toLowerCase();
 
     if (name.endsWith('.png')) {
       return 'image/png';

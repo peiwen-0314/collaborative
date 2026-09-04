@@ -87,8 +87,12 @@ class AdminCulturalHeritageViewPage
                   children: [
                     _grid([
                       _item(
-                        'Document ID',
+                        'Attraction ID',
                         heritage.id,
+                      ),
+                      _item(
+                        'Heritage ID',
+                        heritage.heritageDocumentId,
                       ),
                       _item(
                         'Status',

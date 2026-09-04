@@ -1,11 +1,11 @@
-import 'package:collaborative_asg/views/attraction_management_page.dart';
-import 'package:collaborative_asg/views/category_management_page.dart';
 import 'package:flutter/material.dart';
 
 import '../services/admin_heritage_service.dart';
 import 'admin_heritage_form_page.dart';
 import 'admin_heritage_view_page.dart';
 import 'admin_sidebar.dart';
+import 'attraction_management_page.dart';
+import 'category_management_page.dart';
 
 class AdminCulturalHeritageManagementPage
     extends StatefulWidget {
@@ -42,20 +42,34 @@ class _AdminCulturalHeritageManagementPageState
     Navigator.pop(context);
   }
 
-  void _openAttractionManagement() {
-    Navigator.push(
+  void _goAttractionManagement() {
+    Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (context) => const AttractionManagementPage(),
+        builder: (_) =>
+        const AttractionManagementPage(),
       ),
     );
   }
 
-  void _openCategoryManagement() {
-    Navigator.push(
+  void _goCategoryManagement() {
+    Navigator.pushReplacement(
       context,
       MaterialPageRoute(
-        builder: (context) => const CategoryManagementPage(),
+        builder: (_) =>
+        const CategoryManagementPage(),
+      ),
+    );
+  }
+
+  void _showNotAvailableYet(
+      String moduleName,
+      ) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '$moduleName is not connected yet.',
+        ),
       ),
     );
   }
@@ -155,7 +169,7 @@ class _AdminCulturalHeritageManagementPageState
 
     try {
       await _service.deleteHeritagePlace(
-        heritage.id,
+        heritage.heritageDocumentId,
       );
 
       if (!mounted) {
@@ -193,18 +207,31 @@ class _AdminCulturalHeritageManagementPageState
         children: [
           AdminSidebar(
             selectedPage: 'culturalHeritage',
+
             onDashboardTap: _goDashboard,
-            onAttractionTap: _openAttractionManagement,
-            onCategoryTap: _openCategoryManagement,
+
+            onAttractionTap:
+            _goAttractionManagement,
+
+            onCategoryTap:
+            _goCategoryManagement,
+
             onCulturalHeritageTap: () {
               // Already on Cultural & Heritage Management.
             },
+
             onStampTap: () {
-              // Later add navigation.
+              _showNotAvailableYet(
+                'Stamp Management',
+              );
             },
+
             onReportTap: () {
-              // Later add navigation.
+              _showNotAvailableYet(
+                'Reports & Booking',
+              );
             },
+
             onLogoutTap: _logout,
           ),
 
@@ -262,6 +289,7 @@ class _AdminCulturalHeritageManagementPageState
                               record.attraction;
 
                           final searchable = [
+                            heritage.heritageDocumentId,
                             heritage.id,
                             heritage.name,
                             heritage.city,
@@ -525,7 +553,7 @@ class _AdminCulturalHeritageManagementPageState
                             ),
                             const SizedBox(height: 3),
                             Text(
-                              heritage.id,
+                              heritage.heritageDocumentId,
                               style: const TextStyle(
                                 fontSize: 11,
                                 color: Colors.grey,

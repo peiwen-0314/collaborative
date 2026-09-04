@@ -306,7 +306,7 @@ class _AdminCulturalHeritageFormPageState
       'aliases': _lines(aliases),
       'state': state.text.trim(),
       'city': city.text.trim(),
-      'category': category.text.trim(),
+      'heritageType': category.text.trim(),
       'latitude':
       double.parse(latitude.text.trim()),
       'longitude':
@@ -384,7 +384,8 @@ class _AdminCulturalHeritageFormPageState
 
       if (widget.isEditing) {
         await _service.updateHeritagePlace(
-          id: widget.record!.attraction.id,
+          heritageDocumentId:
+          widget.record!.attraction.heritageDocumentId,
           data: data,
           newImage: _selectedImage,
         );
@@ -497,7 +498,7 @@ class _AdminCulturalHeritageFormPageState
                         ),
                         _field(
                           controller: category,
-                          label: 'Category',
+                          label: 'Heritage Type',
                           validator: _required,
                         ),
                       ),
