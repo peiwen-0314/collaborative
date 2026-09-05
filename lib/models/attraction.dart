@@ -2,37 +2,74 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AttractionModel {
   final String id;
+
   final String name;
   final String categoryId;
   final String categoryName;
+
   final String state;
   final String area;
   final String description;
+
   final bool isFreeEntry;
+
+  // ============================================================
+  // MALAYSIAN ENTRY FEE
+  // ============================================================
 
   final double malaysianAdultFee;
   final double malaysianChildFee;
   final double malaysianSeniorFee;
+
+  // ============================================================
+  // NON-MALAYSIAN ENTRY FEE
+  // ============================================================
+
   final double nonMalaysianAdultFee;
   final double nonMalaysianChildFee;
   final double nonMalaysianSeniorFee;
+
+  // ============================================================
+  // VISIT INFORMATION
+  // ============================================================
 
   final String openingTime;
   final String closingTime;
   final String recommendedDuration;
 
+  // ============================================================
+  // LOCATION / CONTACT
+  // ============================================================
+
   final String address;
-  final String phoneNumber;
   final double latitude;
   final double longitude;
+  final String phoneNumber;
+
+  // ============================================================
+  // FACILITIES / HIGHLIGHTS
+  // ============================================================
 
   final List<String> facilities;
   final List<String> highlights;
+
+  // ============================================================
+  // IMAGES
+  // ============================================================
+
   final List<String> imageUrls;
   final String coverImageUrl;
 
+  // ============================================================
+  // OTHER
+  // ============================================================
+
   final String status;
   final DateTime createdAt;
+
+  // ============================================================
+  // CONSTRUCTOR
+  // ============================================================
 
   AttractionModel({
     required this.id,
@@ -53,9 +90,9 @@ class AttractionModel {
     required this.closingTime,
     required this.recommendedDuration,
     required this.address,
-    required this.phoneNumber,
     this.latitude = 0,
     this.longitude = 0,
+    required this.phoneNumber,
     required this.facilities,
     required this.highlights,
     required this.imageUrls,
@@ -64,129 +101,404 @@ class AttractionModel {
     required this.createdAt,
   });
 
+  // ============================================================
+  // FROM FIRESTORE
+  // ============================================================
+
   factory AttractionModel.fromFirestore(
       DocumentSnapshot<Map<String, dynamic>> document,
       ) {
-    final data = document.data() ?? <String, dynamic>{};
+    final Map<String, dynamic> data =
+        document.data() ?? <String, dynamic>{};
 
-    double number(String key, {String? fallbackKey}) {
+    // ==========================================================
+    // NUMBER HELPER
+    // ==========================================================
+
+    double number(
+        String key, {
+          String? fallbackKey,
+        }) {
       dynamic value = data[key];
 
       if (value == null && fallbackKey != null) {
         value = data[fallbackKey];
       }
 
-      if (value is num) return value.toDouble();
-      if (value is String) return double.tryParse(value.trim()) ?? 0;
+      if (value is num) {
+        return value.toDouble();
+      }
+
+      if (value is String) {
+        return double.tryParse(value) ?? 0;
+      }
+
       return 0;
     }
 
+    // ==========================================================
+    // LIST HELPER
+    // ==========================================================
+
     List<String> stringList(String key) {
-      final value = data[key];
+      final dynamic value = data[key];
 
       if (value is List) {
         return value
             .where((item) => item != null)
-            .map((item) => item.toString().trim())
-            .where((item) => item.isNotEmpty)
+            .map((item) => item.toString())
+            .where((item) => item.trim().isNotEmpty)
             .toList();
       }
 
       return <String>[];
     }
 
-    final loadedImageUrls = stringList('imageUrls');
-    String loadedCoverImageUrl =
-    (data['coverImageUrl'] ?? '').toString().trim();
+    // ==========================================================
+    // IMAGE URLS
+    // ==========================================================
 
-    if (loadedCoverImageUrl.isEmpty && loadedImageUrls.isNotEmpty) {
-      loadedCoverImageUrl = loadedImageUrls.first;
+    final List<String> loadedImageUrls =
+    stringList('imageUrls');
+
+    String loadedCoverImageUrl =
+    (data['coverImageUrl'] ?? '')
+        .toString()
+        .trim();
+
+    // If coverImageUrl is empty but imageUrls has images,
+    // automatically use the first image as cover.
+    if (loadedCoverImageUrl.isEmpty &&
+        loadedImageUrls.isNotEmpty) {
+      loadedCoverImageUrl =
+          loadedImageUrls.first;
     }
 
-    DateTime loadedCreatedAt = DateTime.now();
-    final createdAtValue = data['createdAt'];
+    // ==========================================================
+    // CREATED AT
+    // ==========================================================
+
+    DateTime createdAt = DateTime.now();
+
+    final dynamic createdAtValue =
+    data['createdAt'];
 
     if (createdAtValue is Timestamp) {
-      loadedCreatedAt = createdAtValue.toDate();
+      createdAt =
+          createdAtValue.toDate();
     } else if (createdAtValue is DateTime) {
-      loadedCreatedAt = createdAtValue;
+      createdAt =
+          createdAtValue;
     } else if (createdAtValue is String) {
-      loadedCreatedAt =
-          DateTime.tryParse(createdAtValue) ?? DateTime.now();
+      createdAt =
+          DateTime.tryParse(
+            createdAtValue,
+          ) ??
+              DateTime.now();
     }
+
+    // ==========================================================
+    // RETURN MODEL
+    // ==========================================================
 
     return AttractionModel(
       id: document.id,
-      name: (data['name'] ?? '').toString().trim(),
-      categoryId: (data['categoryId'] ?? '').toString().trim(),
-      categoryName: (data['categoryName'] ?? '').toString().trim(),
-      state: (data['state'] ?? '').toString().trim(),
-      area: (data['area'] ?? '').toString().trim(),
-      description: (data['description'] ?? '').toString().trim(),
-      isFreeEntry: data['isFreeEntry'] == true,
+
+      name:
+      (data['name'] ?? '')
+          .toString()
+          .trim(),
+
+      categoryId:
+      (data['categoryId'] ?? '')
+          .toString()
+          .trim(),
+
+      categoryName:
+      (data['categoryName'] ?? '')
+          .toString()
+          .trim(),
+
+      state:
+      (data['state'] ?? '')
+          .toString()
+          .trim(),
+
+      area:
+      (data['area'] ?? '')
+          .toString()
+          .trim(),
+
+      description:
+      (data['description'] ?? '')
+          .toString()
+          .trim(),
+
+      isFreeEntry:
+      data['isFreeEntry'] == true,
+
+      // ========================================================
+      // MALAYSIAN FEES
+      // ========================================================
+
       malaysianAdultFee:
-      number('malaysianAdultFee', fallbackKey: 'adultFee'),
+      number(
+        'malaysianAdultFee',
+        fallbackKey: 'adultFee',
+      ),
+
       malaysianChildFee:
-      number('malaysianChildFee', fallbackKey: 'childFee'),
-      malaysianSeniorFee: number('malaysianSeniorFee'),
+      number(
+        'malaysianChildFee',
+        fallbackKey: 'childFee',
+      ),
+
+      malaysianSeniorFee:
+      number(
+        'malaysianSeniorFee',
+      ),
+
+      // ========================================================
+      // NON-MALAYSIAN FEES
+      // ========================================================
+
       nonMalaysianAdultFee:
-      number('nonMalaysianAdultFee', fallbackKey: 'adultFee'),
+      number(
+        'nonMalaysianAdultFee',
+        fallbackKey: 'adultFee',
+      ),
+
       nonMalaysianChildFee:
-      number('nonMalaysianChildFee', fallbackKey: 'childFee'),
-      nonMalaysianSeniorFee: number('nonMalaysianSeniorFee'),
-      openingTime: (data['openingTime'] ?? '').toString().trim(),
-      closingTime: (data['closingTime'] ?? '').toString().trim(),
+      number(
+        'nonMalaysianChildFee',
+        fallbackKey: 'childFee',
+      ),
+
+      nonMalaysianSeniorFee:
+      number(
+        'nonMalaysianSeniorFee',
+      ),
+
+      // ========================================================
+      // VISIT INFORMATION
+      // ========================================================
+
+      openingTime:
+      (data['openingTime'] ?? '')
+          .toString()
+          .trim(),
+
+      closingTime:
+      (data['closingTime'] ?? '')
+          .toString()
+          .trim(),
+
       recommendedDuration:
-      (data['recommendedDuration'] ?? '').toString().trim(),
-      address: (data['address'] ?? '').toString().trim(),
-      phoneNumber: (data['phoneNumber'] ?? '').toString().trim(),
-      latitude: number('latitude'),
-      longitude: number('longitude'),
-      facilities: stringList('facilities'),
-      highlights: stringList('highlights'),
-      imageUrls: loadedImageUrls,
-      coverImageUrl: loadedCoverImageUrl,
-      status: (data['status'] ?? 'Active').toString().trim(),
-      createdAt: loadedCreatedAt,
+      (data['recommendedDuration'] ?? '')
+          .toString()
+          .trim(),
+
+      // ========================================================
+      // LOCATION / CONTACT
+      // ========================================================
+
+      address:
+      (data['address'] ?? '')
+          .toString()
+          .trim(),
+
+      latitude:
+      number('latitude'),
+
+      longitude:
+      number('longitude'),
+
+      phoneNumber:
+      (data['phoneNumber'] ?? '')
+          .toString()
+          .trim(),
+
+      // ========================================================
+      // FACILITIES / HIGHLIGHTS
+      // ========================================================
+
+      facilities:
+      stringList(
+        'facilities',
+      ),
+
+      highlights:
+      stringList(
+        'highlights',
+      ),
+
+      // ========================================================
+      // IMAGES
+      // ========================================================
+
+      imageUrls:
+      loadedImageUrls,
+
+      coverImageUrl:
+      loadedCoverImageUrl,
+
+      // ========================================================
+      // OTHER
+      // ========================================================
+
+      status:
+      (data['status'] ?? 'Active')
+          .toString()
+          .trim(),
+
+      createdAt:
+      createdAt,
     );
   }
 
-  Map<String, dynamic> toMap() {
-    String finalCoverImageUrl = coverImageUrl.trim();
+  // ============================================================
+  // TO MAP
+  // ============================================================
 
-    if (finalCoverImageUrl.isEmpty && imageUrls.isNotEmpty) {
-      finalCoverImageUrl = imageUrls.first;
+  Map<String, dynamic> toMap() {
+    String finalCoverImageUrl =
+    coverImageUrl.trim();
+
+    // Safety:
+    // if cover image is empty but images exist,
+    // automatically save first image as cover.
+    if (finalCoverImageUrl.isEmpty &&
+        imageUrls.isNotEmpty) {
+      finalCoverImageUrl =
+          imageUrls.first;
     }
 
     return <String, dynamic>{
-      'name': name.trim(),
-      'categoryId': categoryId.trim(),
-      'categoryName': categoryName.trim(),
-      'state': state.trim(),
-      'area': area.trim(),
-      'description': description.trim(),
-      'isFreeEntry': isFreeEntry,
-      'malaysianAdultFee': isFreeEntry ? 0 : malaysianAdultFee,
-      'malaysianChildFee': isFreeEntry ? 0 : malaysianChildFee,
-      'malaysianSeniorFee': isFreeEntry ? 0 : malaysianSeniorFee,
-      'nonMalaysianAdultFee': isFreeEntry ? 0 : nonMalaysianAdultFee,
-      'nonMalaysianChildFee': isFreeEntry ? 0 : nonMalaysianChildFee,
-      'nonMalaysianSeniorFee': isFreeEntry ? 0 : nonMalaysianSeniorFee,
-      'openingTime': openingTime.trim(),
-      'closingTime': closingTime.trim(),
-      'recommendedDuration': recommendedDuration.trim(),
-      'address': address.trim(),
-      'phoneNumber': phoneNumber.trim(),
-      'latitude': latitude,
-      'longitude': longitude,
-      'facilities': facilities,
-      'highlights': highlights,
-      'imageUrls': imageUrls,
-      'coverImageUrl': finalCoverImageUrl,
-      'status': status.trim(),
-      'createdAt': Timestamp.fromDate(createdAt),
+      // ========================================================
+      // BASIC INFORMATION
+      // ========================================================
+
+      'name':
+      name.trim(),
+
+      'categoryId':
+      categoryId.trim(),
+
+      'categoryName':
+      categoryName.trim(),
+
+      'state':
+      state.trim(),
+
+      'area':
+      area.trim(),
+
+      'description':
+      description.trim(),
+
+      // ========================================================
+      // ENTRY FEE
+      // ========================================================
+
+      'isFreeEntry':
+      isFreeEntry,
+
+      'malaysianAdultFee':
+      isFreeEntry
+          ? 0
+          : malaysianAdultFee,
+
+      'malaysianChildFee':
+      isFreeEntry
+          ? 0
+          : malaysianChildFee,
+
+      'malaysianSeniorFee':
+      isFreeEntry
+          ? 0
+          : malaysianSeniorFee,
+
+      'nonMalaysianAdultFee':
+      isFreeEntry
+          ? 0
+          : nonMalaysianAdultFee,
+
+      'nonMalaysianChildFee':
+      isFreeEntry
+          ? 0
+          : nonMalaysianChildFee,
+
+      'nonMalaysianSeniorFee':
+      isFreeEntry
+          ? 0
+          : nonMalaysianSeniorFee,
+
+      // ========================================================
+      // VISIT INFORMATION
+      // ========================================================
+
+      'openingTime':
+      openingTime.trim(),
+
+      'closingTime':
+      closingTime.trim(),
+
+      'recommendedDuration':
+      recommendedDuration.trim(),
+
+      // ========================================================
+      // LOCATION / CONTACT
+      // ========================================================
+
+      'address':
+      address.trim(),
+
+      'latitude':
+      latitude,
+
+      'longitude':
+      longitude,
+
+      'phoneNumber':
+      phoneNumber.trim(),
+
+      // ========================================================
+      // FACILITIES / HIGHLIGHTS
+      // ========================================================
+
+      'facilities':
+      facilities,
+
+      'highlights':
+      highlights,
+
+      // ========================================================
+      // IMAGES
+      // ========================================================
+
+      'imageUrls':
+      imageUrls,
+
+      'coverImageUrl':
+      finalCoverImageUrl,
+
+      // ========================================================
+      // STATUS / DATE
+      // ========================================================
+
+      'status':
+      status.trim(),
+
+      'createdAt':
+      Timestamp.fromDate(
+        createdAt,
+      ),
     };
   }
+
+  // ============================================================
+  // COPY WITH
+  // ============================================================
 
   AttractionModel copyWith({
     String? id,
@@ -207,9 +519,9 @@ class AttractionModel {
     String? closingTime,
     String? recommendedDuration,
     String? address,
-    String? phoneNumber,
     double? latitude,
     double? longitude,
+    String? phoneNumber,
     List<String>? facilities,
     List<String>? highlights,
     List<String>? imageUrls,
@@ -218,40 +530,115 @@ class AttractionModel {
     DateTime? createdAt,
   }) {
     return AttractionModel(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      categoryId: categoryId ?? this.categoryId,
-      categoryName: categoryName ?? this.categoryName,
-      state: state ?? this.state,
-      area: area ?? this.area,
-      description: description ?? this.description,
-      isFreeEntry: isFreeEntry ?? this.isFreeEntry,
+      id:
+      id ?? this.id,
+
+      name:
+      name ?? this.name,
+
+      categoryId:
+      categoryId ??
+          this.categoryId,
+
+      categoryName:
+      categoryName ??
+          this.categoryName,
+
+      state:
+      state ?? this.state,
+
+      area:
+      area ?? this.area,
+
+      description:
+      description ??
+          this.description,
+
+      isFreeEntry:
+      isFreeEntry ??
+          this.isFreeEntry,
+
       malaysianAdultFee:
-      malaysianAdultFee ?? this.malaysianAdultFee,
+      malaysianAdultFee ??
+          this.malaysianAdultFee,
+
       malaysianChildFee:
-      malaysianChildFee ?? this.malaysianChildFee,
+      malaysianChildFee ??
+          this.malaysianChildFee,
+
       malaysianSeniorFee:
-      malaysianSeniorFee ?? this.malaysianSeniorFee,
+      malaysianSeniorFee ??
+          this.malaysianSeniorFee,
+
       nonMalaysianAdultFee:
-      nonMalaysianAdultFee ?? this.nonMalaysianAdultFee,
+      nonMalaysianAdultFee ??
+          this.nonMalaysianAdultFee,
+
       nonMalaysianChildFee:
-      nonMalaysianChildFee ?? this.nonMalaysianChildFee,
+      nonMalaysianChildFee ??
+          this.nonMalaysianChildFee,
+
       nonMalaysianSeniorFee:
-      nonMalaysianSeniorFee ?? this.nonMalaysianSeniorFee,
-      openingTime: openingTime ?? this.openingTime,
-      closingTime: closingTime ?? this.closingTime,
+      nonMalaysianSeniorFee ??
+          this.nonMalaysianSeniorFee,
+
+      openingTime:
+      openingTime ??
+          this.openingTime,
+
+      closingTime:
+      closingTime ??
+          this.closingTime,
+
       recommendedDuration:
-      recommendedDuration ?? this.recommendedDuration,
-      address: address ?? this.address,
-      phoneNumber: phoneNumber ?? this.phoneNumber,
-      latitude: latitude ?? this.latitude,
-      longitude: longitude ?? this.longitude,
-      facilities: facilities ?? List<String>.from(this.facilities),
-      highlights: highlights ?? List<String>.from(this.highlights),
-      imageUrls: imageUrls ?? List<String>.from(this.imageUrls),
-      coverImageUrl: coverImageUrl ?? this.coverImageUrl,
-      status: status ?? this.status,
-      createdAt: createdAt ?? this.createdAt,
+      recommendedDuration ??
+          this.recommendedDuration,
+
+      address:
+      address ??
+          this.address,
+
+      latitude:
+      latitude ??
+          this.latitude,
+
+      longitude:
+      longitude ??
+          this.longitude,
+
+      phoneNumber:
+      phoneNumber ??
+          this.phoneNumber,
+
+      facilities:
+      facilities ??
+          List<String>.from(
+            this.facilities,
+          ),
+
+      highlights:
+      highlights ??
+          List<String>.from(
+            this.highlights,
+          ),
+
+      imageUrls:
+      imageUrls ??
+          List<String>.from(
+            this.imageUrls,
+          ),
+
+      coverImageUrl:
+      coverImageUrl ??
+          this.coverImageUrl,
+
+      status:
+      status ??
+          this.status,
+
+      createdAt:
+      createdAt ??
+          this.createdAt,
     );
   }
 }

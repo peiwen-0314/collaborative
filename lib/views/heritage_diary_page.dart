@@ -256,9 +256,21 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
       return;
     }
 
+    final cleanStory = savedStory.trim();
+
+    if (cleanStory.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Story cannot be empty.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     await _storage.updateDiaryStory(
       entry.documentId,
-      savedStory,
+      cleanStory,
     );
 
     await _loadDiary();
@@ -269,10 +281,8 @@ class _HeritageDiaryPageState extends State<HeritageDiaryPage> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          savedStory.isEmpty
-              ? 'Story removed.'
-              : 'Your story has been saved.',
+        content: const Text(
+          'Your story has been saved.',
         ),
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 2),
@@ -1763,6 +1773,8 @@ class _StoryEditorDialogState
   // Always open in view mode first.
   bool _isEditing = false;
 
+  String? _storyError;
+
   @override
   void initState() {
     super.initState();
@@ -1784,6 +1796,7 @@ class _StoryEditorDialogState
   void _startEditing() {
     setState(() {
       _isEditing = true;
+      _storyError = null;
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1800,13 +1813,25 @@ class _StoryEditorDialogState
       // Discard unsaved changes.
       _controller.text = widget.initialStory;
       _isEditing = false;
+      _storyError = null;
     });
   }
 
   void _save() {
+    final story = _controller.text.trim();
+
+    if (story.isEmpty) {
+      setState(() {
+        _storyError = 'Story cannot be empty.';
+      });
+
+      _focusNode.requestFocus();
+      return;
+    }
+
     Navigator.pop(
       context,
-      _controller.text.trim(),
+      story,
     );
   }
 
@@ -2067,6 +2092,14 @@ class _StoryEditorDialogState
                 TextField(
                   controller: _controller,
                   focusNode: _focusNode,
+                  onChanged: (value) {
+                    if (_storyError != null &&
+                        value.trim().isNotEmpty) {
+                      setState(() {
+                        _storyError = null;
+                      });
+                    }
+                  },
                   minLines: 4,
                   maxLines: 7,
                   maxLength: 500,
@@ -2075,6 +2108,7 @@ class _StoryEditorDialogState
                   textInputAction:
                   TextInputAction.newline,
                   decoration: InputDecoration(
+                    errorText: _storyError,
                     hintText:
                     'What did you see, learn, feel, or enjoy here?',
                     hintStyle: const TextStyle(

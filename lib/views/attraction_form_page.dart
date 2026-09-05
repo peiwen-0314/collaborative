@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,7 +8,8 @@ import '../controllers/attraction_controller.dart';
 import '../models/attraction.dart';
 import '../models/category.dart';
 import 'admin_sidebar.dart';
-import 'admin_heritage_management_page.dart';
+import 'admin_heritage_form_page.dart';
+import 'attraction_map_picker_page.dart';
 
 class AttractionFormPage extends StatefulWidget {
   final AttractionModel? attraction;
@@ -34,6 +36,8 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
   late final TextEditingController _areaController;
   late final TextEditingController _descriptionController;
   late final TextEditingController _addressController;
+  late final TextEditingController _latitudeController;
+  late final TextEditingController _longitudeController;
   late final TextEditingController _phoneController;
 
   late final TextEditingController _malaysianAdultController;
@@ -57,6 +61,46 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
   String? _existingCoverUrl;
 
   bool get _isEdit => widget.attraction != null;
+
+  static const String _culturalHeritageCategoryId =
+      'S8wzl7nxsXMZ73Zvtuhq';
+
+  bool get _isExistingCulturalHeritage {
+    final attraction = widget.attraction;
+
+    if (attraction == null) {
+      return false;
+    }
+
+    return attraction.categoryId ==
+        _culturalHeritageCategoryId ||
+        attraction.categoryName
+            .trim()
+            .toLowerCase() ==
+            'cultural & heritage';
+  }
+
+  bool get _isCulturalHeritage {
+    if (_selectedCategoryId ==
+        _culturalHeritageCategoryId) {
+      return true;
+    }
+
+    for (final category in _controller.categories) {
+      if (category.id == _selectedCategoryId &&
+          category.name
+              .trim()
+              .toLowerCase() ==
+              'cultural & heritage') {
+        return true;
+      }
+    }
+
+    return widget.attraction?.categoryName
+        .trim()
+        .toLowerCase() ==
+        'cultural & heritage';
+  }
 
   final List<String> _facilityOptions = [
     'Parking',
@@ -107,6 +151,20 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     _descriptionController =
         TextEditingController(text: attraction?.description ?? '');
     _addressController = TextEditingController(text: attraction?.address ?? '');
+
+    final latitude = attraction?.latitude ?? 0;
+    final longitude = attraction?.longitude ?? 0;
+
+    _latitudeController = TextEditingController(
+      text: latitude == 0
+          ? ''
+          : latitude.toStringAsFixed(6),
+    );
+    _longitudeController = TextEditingController(
+      text: longitude == 0
+          ? ''
+          : longitude.toStringAsFixed(6),
+    );
 
     final storedPhone = attraction?.phoneNumber ?? '';
     _phoneController = TextEditingController(
@@ -168,6 +226,8 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     _areaController.dispose();
     _descriptionController.dispose();
     _addressController.dispose();
+    _latitudeController.dispose();
+    _longitudeController.dispose();
     _phoneController.dispose();
     _malaysianAdultController.dispose();
     _malaysianChildController.dispose();
@@ -200,13 +260,8 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
             onAttractionTap: () => Navigator.pop(context),
             onCategoryTap: () {},
             onCulturalHeritageTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                  const AdminCulturalHeritageManagementPage(),
-                ),
-              );
+              // Cultural information is managed from
+              // Attraction Management now.
             },
             onStampTap: () {},
             onReportTap: () {},
@@ -269,34 +324,121 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     return Row(
       children: [
         IconButton(
-          onPressed: _controller.isProcessing ? null : () => Navigator.pop(context),
-          icon: const Icon(Icons.arrow_back),
+          onPressed:
+          _controller.isProcessing
+              ? null
+              : () =>
+              Navigator.pop(
+                context,
+              ),
+          icon:
+          const Icon(
+            Icons.arrow_back,
+          ),
           tooltip: 'Back',
         ),
         const SizedBox(width: 6),
         Expanded(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment:
+            CrossAxisAlignment.start,
             children: [
               Text(
-                _isEdit ? 'Edit Attraction' : 'Add New Attraction',
-                style: const TextStyle(
+                _isEdit
+                    ? 'Edit Attraction'
+                    : 'Add New Attraction',
+                style:
+                const TextStyle(
                   fontSize: 28,
-                  fontWeight: FontWeight.bold,
+                  fontWeight:
+                  FontWeight.bold,
                   color: textColor,
                 ),
               ),
-              const SizedBox(height: 5),
+              const SizedBox(
+                height: 5,
+              ),
               Text(
-                _isEdit
+                !_isEdit &&
+                    _isCulturalHeritage
+                    ? 'Step 1 of 2: Complete the attraction details, then click Next.'
+                    : _isEdit
                     ? 'Update attraction details, visitor information and images.'
                     : 'Add attraction details, visitor information and images.',
-                style: const TextStyle(fontSize: 13, color: secondaryText),
+                style:
+                const TextStyle(
+                  fontSize: 13,
+                  color:
+                  secondaryText,
+                ),
               ),
             ],
           ),
         ),
+
+        // When editing an existing Cultural & Heritage attraction,
+        // cultural information is edited separately from the
+        // normal Attraction form.
+        if (_isEdit &&
+            _isExistingCulturalHeritage) ...[
+          const SizedBox(width: 18),
+          ElevatedButton.icon(
+            onPressed:
+            _controller.isProcessing
+                ? null
+                : _openCulturalInformation,
+            style:
+            ElevatedButton.styleFrom(
+              backgroundColor:
+              mainGreen,
+              foregroundColor:
+              Colors.white,
+              elevation: 0,
+              padding:
+              const EdgeInsets
+                  .symmetric(
+                horizontal: 18,
+                vertical: 16,
+              ),
+              shape:
+              RoundedRectangleBorder(
+                borderRadius:
+                BorderRadius.circular(
+                  7,
+                ),
+              ),
+            ),
+            icon:
+            const Icon(
+              Icons
+                  .account_balance_outlined,
+              size: 19,
+            ),
+            label:
+            const Text(
+              'Edit Cultural Information',
+            ),
+          ),
+        ],
       ],
+    );
+  }
+
+  Future<void> _openCulturalInformation() async {
+    if (!_isEdit ||
+        !_isExistingCulturalHeritage) {
+      return;
+    }
+
+    await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            AdminHeritageFormPage(
+              attractionId:
+              widget.attraction!.id,
+            ),
+      ),
     );
   }
 
@@ -379,7 +521,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     return _sectionCard(
       title: 'Visit Information',
       subtitle:
-      'Enter only the entry fees that apply. Leave fields blank when the same price is used for multiple visitor groups.',
+      'Set Malaysian and non-Malaysian entry fees, opening hours and visit duration.',
       icon: Icons.schedule_outlined,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -424,32 +566,6 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          if (!_isFreeEntry)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 11,
-              ),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0FDF4),
-                borderRadius: BorderRadius.circular(7),
-                border: Border.all(
-                  color: const Color(0xFFBBF7D0),
-                ),
-              ),
-              child: const Text(
-                'Price fields are optional. Enter only prices that are different. '
-                    'Blank age prices will use the Adult price for that visitor group. '
-                    'If Non-Malaysian prices are blank, Malaysian prices will be used.',
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.4,
-                  color: Color(0xFF166534),
-                ),
-              ),
-            ),
           const SizedBox(height: 18),
           _priceGroup(
             title: 'Malaysian',
@@ -473,18 +589,19 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
                 'Opening Time',
                 _timeField(
                   value: _openingTime,
-                  placeholder: 'Optional',
+                  placeholder: 'Select opening time',
                   onTap: _pickOpeningTime,
                 ),
+                required: true,
               );
-
               final closing = _fieldBlock(
                 'Closing Time',
                 _timeField(
                   value: _closingTime,
-                  placeholder: 'Optional',
+                  placeholder: 'Select closing time',
                   onTap: _pickClosingTime,
                 ),
+                required: true,
               );
               final duration = _fieldBlock(
                 'Recommended Sightseeing Time',
@@ -625,43 +742,178 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
   Widget _locationContact() {
     return _sectionCard(
       title: 'Location & Contact',
-      subtitle: 'Provide the attraction address and Malaysian phone number.',
+      subtitle:
+      'Provide the attraction address, map coordinates and Malaysian phone number.',
       icon: Icons.location_on_outlined,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+        CrossAxisAlignment.start,
         children: [
-          _label('Full Address', required: true),
+          _label(
+            'Full Address',
+            required: true,
+          ),
           _textField(
-            controller: _addressController,
-            hint: 'Enter the complete attraction address...',
+            controller:
+            _addressController,
+            hint:
+            'Enter the complete attraction address...',
             maxLines: 3,
             maxLength: 250,
           ),
-          const SizedBox(height: 18),
+          const SizedBox(
+            height: 18,
+          ),
+
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Map Coordinates',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight:
+                    FontWeight.w600,
+                    color:
+                    textColor,
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed:
+                _controller
+                    .isProcessing
+                    ? null
+                    : _openMapPicker,
+                style:
+                OutlinedButton
+                    .styleFrom(
+                  foregroundColor:
+                  mainGreen,
+                  side:
+                  const BorderSide(
+                    color:
+                    mainGreen,
+                  ),
+                ),
+                icon:
+                const Icon(
+                  Icons.map_outlined,
+                  size: 18,
+                ),
+                label:
+                const Text(
+                  'Find on Map',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(
+            height: 7,
+          ),
           LayoutBuilder(
-            builder: (context, constraints) {
-              return SizedBox(
-                width: constraints.maxWidth < 600 ? double.infinity : 500,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            builder:
+                (context, constraints) {
+              final compact =
+                  constraints.maxWidth <
+                      650;
+
+              final latitude =
+              _fieldBlock(
+                'Latitude',
+                _coordinateField(
+                  controller:
+                  _latitudeController,
+                  hint:
+                  'e.g. 5.415000',
+                ),
+                required: true,
+              );
+
+              final longitude =
+              _fieldBlock(
+                'Longitude',
+                _coordinateField(
+                  controller:
+                  _longitudeController,
+                  hint:
+                  'e.g. 100.337100',
+                ),
+                required: true,
+              );
+
+              if (compact) {
+                return Column(
                   children: [
-                    _label('Phone Number'),
-                    _phoneField(),
-                    const SizedBox(height: 5),
-                    const Text(
-                      'Optional • Malaysia format, e.g. +60123456789',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: secondaryText,
-                      ),
+                    latitude,
+                    const SizedBox(
+                      height: 14,
+                    ),
+                    longitude,
+                  ],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: latitude,
+                  ),
+                  const SizedBox(
+                    width: 16,
+                  ),
+                  Expanded(
+                    child: longitude,
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(
+            height: 6,
+          ),
+          const Text(
+            'You can enter the coordinates manually or click Find on Map to search and pin the attraction location.',
+            style: TextStyle(
+              fontSize: 11,
+              color: secondaryText,
+            ),
+          ),
+          const SizedBox(
+            height: 18,
+          ),
+
+          LayoutBuilder(
+            builder:
+                (context, constraints) {
+              return SizedBox(
+                width:
+                constraints.maxWidth <
+                    600
+                    ? double.infinity
+                    : 500,
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
+                  children: [
+                    _label(
+                      'Phone Number',
+                      required: true,
                     ),
                     _phoneField(),
-                    const SizedBox(height: 5),
+                    const SizedBox(
+                      height: 5,
+                    ),
                     const Text(
                       'Malaysia format only. Example: +60123456789',
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: secondaryText
+                      style:
+                      TextStyle(
+                        fontSize: 11,
+                        color:
+                        secondaryText,
                       ),
                     ),
                   ],
@@ -672,6 +924,114 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
         ],
       ),
     );
+  }
+
+  Widget _coordinateField({
+    required TextEditingController controller,
+    required String hint,
+  }) {
+    return TextField(
+      controller: controller,
+      enabled:
+      !_controller.isProcessing,
+      keyboardType:
+      const TextInputType
+          .numberWithOptions(
+        decimal: true,
+        signed: true,
+      ),
+      inputFormatters: [
+        FilteringTextInputFormatter.allow(
+          RegExp(r'[-0-9.]'),
+        ),
+        LengthLimitingTextInputFormatter(
+          16,
+        ),
+      ],
+      decoration:
+      _inputDecoration(
+        hint: hint,
+      ),
+    );
+  }
+
+  double? _parsedLatitude() {
+    final value = double.tryParse(
+      _latitudeController.text.trim(),
+    );
+
+    if (value == null ||
+        value < -90 ||
+        value > 90) {
+      return null;
+    }
+
+    return value;
+  }
+
+  double? _parsedLongitude() {
+    final value = double.tryParse(
+      _longitudeController.text.trim(),
+    );
+
+    if (value == null ||
+        value < -180 ||
+        value > 180) {
+      return null;
+    }
+
+    return value;
+  }
+
+  Future<void> _openMapPicker() async {
+    final latitude =
+    _parsedLatitude();
+    final longitude =
+    _parsedLongitude();
+
+    final result =
+    await Navigator.push<
+        AttractionMapSelection>(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            AttractionMapPickerPage(
+              initialLatitude:
+              latitude,
+              initialLongitude:
+              longitude,
+              initialSearchText:
+              _addressController.text
+                  .trim(),
+            ),
+      ),
+    );
+
+    if (!mounted ||
+        result == null) {
+      return;
+    }
+
+    setState(() {
+      _latitudeController.text =
+          result.latitude
+              .toStringAsFixed(6);
+
+      _longitudeController.text =
+          result.longitude
+              .toStringAsFixed(6);
+
+      if (_addressController.text
+          .trim()
+          .isEmpty &&
+          result.address != null &&
+          result.address!
+              .trim()
+              .isNotEmpty) {
+        _addressController.text =
+            result.address!.trim();
+      }
+    });
   }
 
   Widget _facilitySection() {
@@ -1121,57 +1481,173 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
   Widget _bottomActions() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 430;
+        final compact =
+            constraints.maxWidth < 650;
 
         final cancel = SizedBox(
-          width: compact ? double.infinity : 180,
+          width:
+          compact ? double.infinity : 150,
           height: 52,
           child: OutlinedButton(
-            onPressed: _controller.isProcessing ? null : () => Navigator.pop(context),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF344054),
-              side: const BorderSide(color: Color(0xFFD0D5DD)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+            onPressed:
+            _controller.isProcessing
+                ? null
+                : () =>
+                Navigator.pop(context),
+            style:
+            OutlinedButton.styleFrom(
+              foregroundColor:
+              const Color(0xFF344054),
+              side: const BorderSide(
+                color: Color(0xFFD0D5DD),
+              ),
+              shape:
+              RoundedRectangleBorder(
+                borderRadius:
+                BorderRadius.circular(7),
+              ),
             ),
-            child: const Text('Cancel'),
+            child:
+            const Text('Cancel'),
           ),
         );
 
-        final save = SizedBox(
-          width: compact ? double.infinity : 180,
+        final primaryButton =
+        (!_isEdit &&
+            _isCulturalHeritage)
+            ? SizedBox(
+          width: compact
+              ? double.infinity
+              : 170,
           height: 52,
-          child: ElevatedButton(
-            onPressed: _controller.isProcessing ? null : _saveAttraction,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: mainGreen,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: mainGreen.withOpacity(0.6),
-              disabledForegroundColor: Colors.white,
+          child:
+          ElevatedButton.icon(
+            onPressed:
+            _controller
+                .isProcessing
+                ? null
+                : () =>
+                _saveAttraction(
+                  openHeritageAfterSave:
+                  true,
+                ),
+            style:
+            ElevatedButton
+                .styleFrom(
+              backgroundColor:
+              mainGreen,
+              foregroundColor:
+              Colors.white,
               elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+              shape:
+              RoundedRectangleBorder(
+                borderRadius:
+                BorderRadius
+                    .circular(7),
+              ),
             ),
-            child: _controller.isProcessing
+            icon: _controller
+                .isProcessing
+                ? const SizedBox(
+              width: 18,
+              height: 18,
+              child:
+              CircularProgressIndicator(
+                strokeWidth:
+                2.5,
+                color:
+                Colors.white,
+              ),
+            )
+                : const Icon(
+              Icons
+                  .arrow_forward,
+              size: 19,
+            ),
+            label: Text(
+              _controller
+                  .isProcessing
+                  ? 'Saving...'
+                  : 'Next',
+            ),
+          ),
+        )
+            : SizedBox(
+          width: compact
+              ? double.infinity
+              : 180,
+          height: 52,
+          child:
+          ElevatedButton(
+            onPressed:
+            _controller
+                .isProcessing
+                ? null
+                : () =>
+                _saveAttraction(),
+            style:
+            ElevatedButton
+                .styleFrom(
+              backgroundColor:
+              mainGreen,
+              foregroundColor:
+              Colors.white,
+              elevation: 0,
+              shape:
+              RoundedRectangleBorder(
+                borderRadius:
+                BorderRadius
+                    .circular(7),
+              ),
+            ),
+            child:
+            _controller.isProcessing
                 ? Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisAlignment:
+              MainAxisAlignment
+                  .center,
               children: [
                 const SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: Colors.white,
+                  child:
+                  CircularProgressIndicator(
+                    strokeWidth:
+                    2.5,
+                    color:
+                    Colors.white,
                   ),
                 ),
-                const SizedBox(width: 9),
-                Text(_isEdit ? 'Saving...' : 'Adding...'),
+                const SizedBox(
+                  width: 9,
+                ),
+                Text(
+                  _isEdit
+                      ? 'Saving...'
+                      : 'Adding...',
+                ),
               ],
             )
                 : Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisAlignment:
+              MainAxisAlignment
+                  .center,
               children: [
-                Icon(_isEdit ? Icons.save_outlined : Icons.add, size: 19),
-                const SizedBox(width: 7),
-                Text(_isEdit ? 'Save Changes' : 'Add Attraction'),
+                Icon(
+                  _isEdit
+                      ? Icons
+                      .save_outlined
+                      : Icons.add,
+                  size: 19,
+                ),
+                const SizedBox(
+                  width: 7,
+                ),
+                Text(
+                  _isEdit
+                      ? 'Save Changes'
+                      : 'Add Attraction',
+                ),
               ],
             ),
           ),
@@ -1179,13 +1655,22 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
 
         if (compact) {
           return Column(
-            children: [cancel, const SizedBox(height: 10), save],
+            children: [
+              cancel,
+              const SizedBox(height: 10),
+              primaryButton,
+            ],
           );
         }
 
         return Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [cancel, const SizedBox(width: 12), save],
+          mainAxisAlignment:
+          MainAxisAlignment.end,
+          children: [
+            cancel,
+            const SizedBox(width: 12),
+            primaryButton,
+          ],
         );
       },
     );
@@ -1315,7 +1800,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
         LengthLimitingTextInputFormatter(7),
       ],
       decoration: InputDecoration(
-        hintText: 'Optional',
+        hintText: '0.00',
         hintStyle: const TextStyle(fontSize: 13, color: Color(0xFF98A2B3)),
         prefixIcon: Container(
           width: 54,
@@ -1621,30 +2106,24 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
   }
 
-  bool _isValidOptionalFee(TextEditingController controller) {
-    final text = controller.text.trim();
-
-    if (text.isEmpty) return true;
-
-    if (!RegExp(r'^\d{1,4}(\.\d{1,2})?$').hasMatch(text)) {
-      return false;
-    }
-
-    final value = double.tryParse(text);
-    return value != null && value >= 0 && value <= 9999;
-  }
-
-  double? _optionalFee(TextEditingController controller) {
+  double? _validateFee(TextEditingController controller) {
     final text = controller.text.trim();
     if (text.isEmpty) return null;
-    return double.tryParse(text);
+    if (!RegExp(r'^\d{1,4}(\.\d{1,2})?$').hasMatch(text)) return null;
+    final value = double.tryParse(text);
+    if (value == null || value < 0 || value > 9999) return null;
+    return value;
   }
 
-  Future<void> _saveAttraction() async {
+  Future<void> _saveAttraction({
+    bool openHeritageAfterSave = false,
+  }) async {
     final name = _nameController.text.trim();
     final area = _areaController.text.trim();
     final description = _descriptionController.text.trim();
     final address = _addressController.text.trim();
+    final latitude = _parsedLatitude();
+    final longitude = _parsedLongitude();
     final localPhone = _phoneController.text.trim();
     final fullPhone = '+60$localPhone';
 
@@ -1654,6 +2133,8 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
         area.isEmpty ||
         description.isEmpty ||
         address.isEmpty ||
+        _latitudeController.text.trim().isEmpty ||
+        _longitudeController.text.trim().isEmpty ||
         localPhone.isEmpty ||
         _openingTime == null ||
         _closingTime == null) {
@@ -1678,6 +2159,22 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
 
     if (address.length < 10) {
       _showMessage('Please enter a complete attraction address.', error: true);
+      return;
+    }
+
+    if (latitude == null) {
+      _showMessage(
+        'Latitude must be a valid number between -90 and 90.',
+        error: true,
+      );
+      return;
+    }
+
+    if (longitude == null) {
+      _showMessage(
+        'Longitude must be a valid number between -180 and 180.',
+        error: true,
+      );
       return;
     }
 
@@ -1709,77 +2206,29 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     double nonMalaysianSeniorFee = 0;
 
     if (!_isFreeEntry) {
-      final feeControllers = [
-        _malaysianAdultController,
-        _malaysianChildController,
-        _malaysianSeniorController,
-        _nonMalaysianAdultController,
-        _nonMalaysianChildController,
-        _nonMalaysianSeniorController,
+      final values = [
+        _validateFee(_malaysianAdultController),
+        _validateFee(_malaysianChildController),
+        _validateFee(_malaysianSeniorController),
+        _validateFee(_nonMalaysianAdultController),
+        _validateFee(_nonMalaysianChildController),
+        _validateFee(_nonMalaysianSeniorController),
       ];
 
-      if (feeControllers.any(
-            (controller) => !_isValidOptionalFee(controller),
-      )) {
+      if (values.any((value) => value == null)) {
         _showMessage(
-          'Entry fees must be valid values from RM 0.00 to RM 9,999.00. '
-              'Price fields may be left blank when the same fee applies.',
+          'Please enter all 6 entry fees using valid values from RM 0.00 to RM 9,999.00.',
           error: true,
         );
         return;
       }
 
-      final myAdult = _optionalFee(_malaysianAdultController);
-      final myChild = _optionalFee(_malaysianChildController);
-      final mySenior = _optionalFee(_malaysianSeniorController);
-
-      final foreignAdult = _optionalFee(_nonMalaysianAdultController);
-      final foreignChild = _optionalFee(_nonMalaysianChildController);
-      final foreignSenior = _optionalFee(_nonMalaysianSeniorController);
-
-      if (myAdult == null &&
-          myChild == null &&
-          mySenior == null &&
-          foreignAdult == null &&
-          foreignChild == null &&
-          foreignSenior == null) {
-        _showMessage(
-          'Please enter at least one entry fee, or enable Free Entry.',
-          error: true,
-        );
-        return;
-      }
-
-      // Malaysian base price.
-      final baseMalaysian =
-          myAdult ??
-              myChild ??
-              mySenior ??
-              foreignAdult ??
-              foreignChild ??
-              foreignSenior ??
-              0;
-
-      malaysianAdultFee = baseMalaysian;
-      malaysianChildFee = myChild ?? baseMalaysian;
-      malaysianSeniorFee = mySenior ?? baseMalaysian;
-
-      // If no separate Non-Malaysian price is entered,
-      // reuse the equivalent Malaysian price.
-      nonMalaysianAdultFee =
-          foreignAdult ?? malaysianAdultFee;
-
-      nonMalaysianChildFee =
-          foreignChild ??
-              (foreignAdult != null
-                  ? nonMalaysianAdultFee
-                  : malaysianChildFee);
-
-      nonMalaysianSeniorFee =
-          foreignSenior ??
-              (foreignAdult != null
-                  ? nonMalaysianAdultFee
-                  : malaysianSeniorFee);
+      malaysianAdultFee = values[0]!;
+      malaysianChildFee = values[1]!;
+      malaysianSeniorFee = values[2]!;
+      nonMalaysianAdultFee = values[3]!;
+      nonMalaysianChildFee = values[4]!;
+      nonMalaysianSeniorFee = values[5]!;
     }
 
     String? categoryName;
@@ -1827,6 +2276,8 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
         closingTime: _formatTime(_closingTime!),
         recommendedDuration: _recommendedDuration,
         address: address,
+        latitude: latitude,
+        longitude: longitude,
         phoneNumber: fullPhone,
         facilities: _selectedFacilities.toList(),
         highlights: highlights,
@@ -1859,6 +2310,8 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
         closingTime: _formatTime(_closingTime!),
         recommendedDuration: _recommendedDuration,
         address: address,
+        latitude: latitude,
+        longitude: longitude,
         phoneNumber: fullPhone,
         facilities: _selectedFacilities.toList(),
         highlights: highlights,
@@ -1878,10 +2331,88 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
       return;
     }
 
-    _showMessage(_isEdit
-        ? 'Attraction updated successfully.'
-        : 'Attraction added successfully.');
-    Navigator.pop(context, true);
+    String? savedAttractionId;
+
+    if (_isEdit) {
+      savedAttractionId =
+          widget.attraction!.id;
+    } else {
+      // The controller prevents duplicate attraction names,
+      // so the exact name is safe to use to retrieve the
+      // Firestore document created moments ago.
+      final snapshot =
+      await FirebaseFirestore.instance
+          .collection('attractions')
+          .where(
+        'name',
+        isEqualTo: name,
+      )
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isNotEmpty) {
+        savedAttractionId =
+            snapshot.docs.first.id;
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    if (openHeritageAfterSave &&
+        _isCulturalHeritage) {
+      if (savedAttractionId == null ||
+          savedAttractionId.isEmpty) {
+        _showMessage(
+          'Attraction was saved, but its document ID could not be found. '
+              'Open Edit Attraction and try Add Cultural Information again.',
+          error: true,
+        );
+
+        Navigator.pop(
+          context,
+          true,
+        );
+        return;
+      }
+
+      _showMessage(
+        'Attraction added. Continue with cultural information.',
+      );
+
+      await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              AdminHeritageFormPage(
+                attractionId:
+                savedAttractionId!,
+              ),
+        ),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      Navigator.pop(
+        context,
+        true,
+      );
+      return;
+    }
+
+    _showMessage(
+      _isEdit
+          ? 'Attraction updated successfully.'
+          : 'Attraction added successfully.',
+    );
+
+    Navigator.pop(
+      context,
+      true,
+    );
   }
 
   void _showMessage(String message, {bool error = false}) {

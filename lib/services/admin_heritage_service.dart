@@ -51,6 +51,345 @@ class AdminHeritageService {
         'attractions',
       );
 
+
+  // ============================================================
+  // LINKED CULTURAL INFORMATION FORM
+  // ============================================================
+
+  Future<Map<String, dynamic>?> getMasterAttraction(
+      String attractionId,
+      ) async {
+    final cleanId = attractionId.trim();
+
+    if (cleanId.isEmpty) {
+      return null;
+    }
+
+    final snapshot =
+    await _attractionCollection
+        .doc(cleanId)
+        .get();
+
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    return snapshot.data();
+  }
+
+  Future<DocumentSnapshot<Map<String, dynamic>>?>
+  _findHeritageDocumentByAttractionId(
+      String attractionId,
+      ) async {
+    final cleanId = attractionId.trim();
+
+    if (cleanId.isEmpty) {
+      return null;
+    }
+
+    // First try the same document id because new records created
+    // from Attraction Management may use the master Attraction id.
+    final sameId =
+    await _heritageCollection
+        .doc(cleanId)
+        .get();
+
+    if (sameId.exists) {
+      final linkedId =
+          sameId.data()?['attractionId']
+              ?.toString()
+              .trim() ??
+              '';
+
+      if (linkedId.isEmpty ||
+          linkedId == cleanId) {
+        return sameId;
+      }
+    }
+
+    // Existing migrated records such as H001-H005 may use a
+    // different heritage document id, so resolve by attractionId.
+    final query =
+    await _heritageCollection
+        .where(
+      'attractionId',
+      isEqualTo: cleanId,
+    )
+        .limit(1)
+        .get();
+
+    if (query.docs.isEmpty) {
+      return null;
+    }
+
+    return query.docs.first;
+  }
+
+  Future<Map<String, dynamic>?>
+  getHeritageInformationByAttractionId(
+      String attractionId,
+      ) async {
+    final snapshot =
+    await _findHeritageDocumentByAttractionId(
+      attractionId,
+    );
+
+    if (snapshot == null ||
+        !snapshot.exists) {
+      return null;
+    }
+
+    return <String, dynamic>{
+      ...?snapshot.data(),
+      '_heritageDocumentId':
+      snapshot.id,
+    };
+  }
+
+  Future<String> saveHeritageInformation({
+    required String attractionId,
+    required Map<String, dynamic> data,
+  }) async {
+    final cleanAttractionId =
+    attractionId.trim();
+
+    if (cleanAttractionId.isEmpty) {
+      throw ArgumentError(
+        'attractionId is required.',
+      );
+    }
+
+    final master =
+    await _attractionCollection
+        .doc(cleanAttractionId)
+        .get();
+
+    if (!master.exists) {
+      throw StateError(
+        'Attraction $cleanAttractionId does not exist.',
+      );
+    }
+
+    final existing =
+    await _findHeritageDocumentByAttractionId(
+      cleanAttractionId,
+    );
+
+    DocumentReference<Map<String, dynamic>>
+    heritageRef;
+
+    bool isNew = false;
+
+    if (existing != null &&
+        existing.exists) {
+      heritageRef =
+          _heritageCollection.doc(
+            existing.id,
+          );
+    } else {
+      // Prefer a readable one-to-one id when possible.
+      final sameIdRef =
+      _heritageCollection.doc(
+        cleanAttractionId,
+      );
+
+      final sameIdSnapshot =
+      await sameIdRef.get();
+
+      if (!sameIdSnapshot.exists) {
+        heritageRef = sameIdRef;
+      } else {
+        heritageRef =
+            _heritageCollection.doc(
+              await generateNextId(),
+            );
+      }
+
+      isNew = true;
+    }
+
+    final heritageType =
+    data['heritageType']
+        ?.toString()
+        .trim()
+        .isNotEmpty ==
+        true
+        ? data['heritageType']
+        .toString()
+        .trim()
+        : 'Heritage Site';
+
+    final cleanedData =
+    <String, dynamic>{
+      'attractionId':
+      cleanAttractionId,
+      'schemaVersion': 2,
+      'heritageType':
+      heritageType,
+      'aliases':
+      _asStringList(
+        data['aliases'],
+      ),
+      'yearBuilt':
+      data['yearBuilt']
+          ?.toString()
+          .trim() ??
+          '',
+      'architecturalStyle':
+      data['architecturalStyle']
+          ?.toString()
+          .trim() ??
+          '',
+      'heritageStatus':
+      data['heritageStatus']
+          ?.toString()
+          .trim() ??
+          '',
+      'history':
+      data['history']
+          ?.toString()
+          .trim() ??
+          '',
+      'culturalSignificance':
+      data['culturalSignificance']
+          ?.toString()
+          .trim() ??
+          '',
+      'bestTime':
+      data['bestTime']
+          ?.toString()
+          .trim() ??
+          '',
+      'sustainabilityTip':
+      data['sustainabilityTip']
+          ?.toString()
+          .trim() ??
+          '',
+      'visitorEtiquette':
+      data['visitorEtiquette']
+          ?.toString()
+          .trim() ??
+          '',
+      'visitorEtiquetteItems':
+      _asStringList(
+        data[
+        'visitorEtiquetteItems'],
+      ),
+      'conservationGuidelines':
+      _asStringList(
+        data[
+        'conservationGuidelines'],
+      ),
+      'dressCode':
+      _asStringList(
+        data['dressCode'],
+      ),
+      'photographyRestrictions':
+      _asStringList(
+        data[
+        'photographyRestrictions'],
+      ),
+      'preservationPractices':
+      _asStringList(
+        data[
+        'preservationPractices'],
+      ),
+      'audioEnglish':
+      data['audioEnglish']
+          ?.toString()
+          .trim() ??
+          '',
+      'audioMalay':
+      data['audioMalay']
+          ?.toString()
+          .trim() ??
+          '',
+      'audioChinese':
+      data['audioChinese']
+          ?.toString()
+          .trim() ??
+          '',
+      'stampImageUrl':
+      data['stampImageUrl']
+          ?.toString()
+          .trim() ??
+          '',
+      'lastUpdated':
+      FieldValue.serverTimestamp(),
+
+      // Enforce final schema: general Attraction information
+      // must not be duplicated in heritage_attractions.
+      'name': FieldValue.delete(),
+      'address': FieldValue.delete(),
+      'area': FieldValue.delete(),
+      'city': FieldValue.delete(),
+      'state': FieldValue.delete(),
+      'category': FieldValue.delete(),
+      'categoryId': FieldValue.delete(),
+      'categoryName': FieldValue.delete(),
+      'latitude': FieldValue.delete(),
+      'longitude': FieldValue.delete(),
+      'imageUrl': FieldValue.delete(),
+      'coverImageUrl': FieldValue.delete(),
+      'imageUrls': FieldValue.delete(),
+      'openingHours': FieldValue.delete(),
+      'openingTime': FieldValue.delete(),
+      'closingTime': FieldValue.delete(),
+      'shortDescription':
+      FieldValue.delete(),
+      'description': FieldValue.delete(),
+      'recommendedTime':
+      FieldValue.delete(),
+      'recommendedDuration':
+      FieldValue.delete(),
+      'phoneNumber': FieldValue.delete(),
+      'facilities': FieldValue.delete(),
+      'highlights': FieldValue.delete(),
+      'isFreeEntry': FieldValue.delete(),
+      'malaysianAdultFee':
+      FieldValue.delete(),
+      'malaysianChildFee':
+      FieldValue.delete(),
+      'malaysianSeniorFee':
+      FieldValue.delete(),
+      'nonMalaysianAdultFee':
+      FieldValue.delete(),
+      'nonMalaysianChildFee':
+      FieldValue.delete(),
+      'nonMalaysianSeniorFee':
+      FieldValue.delete(),
+      'status': FieldValue.delete(),
+    };
+
+    if (isNew) {
+      cleanedData['createdAt'] =
+          FieldValue.serverTimestamp();
+    }
+
+    await heritageRef.set(
+      cleanedData,
+      SetOptions(merge: true),
+    );
+
+    return heritageRef.id;
+  }
+
+  Future<void> deleteHeritageByAttractionId(
+      String attractionId,
+      ) async {
+    final snapshot =
+    await _findHeritageDocumentByAttractionId(
+      attractionId,
+    );
+
+    if (snapshot == null ||
+        !snapshot.exists) {
+      return;
+    }
+
+    await snapshot.reference.delete();
+  }
+
   // ============================================================
   // WATCH JOINED ADMIN RECORDS
   // ============================================================

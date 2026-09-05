@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../controllers/category_controller.dart';
 import '../models/category.dart';
 import 'admin_sidebar.dart';
-import 'admin_heritage_management_page.dart';
 import 'attraction_management_page.dart';
 
 class CategoryManagementPage
@@ -109,13 +108,8 @@ class _CategoryManagementPageState
             },
 
             onCulturalHeritageTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                  const AdminCulturalHeritageManagementPage(),
-                ),
-              );
+              // Cultural & Heritage is managed through
+              // Attraction Management now.
             },
 
             onStampTap: () {},

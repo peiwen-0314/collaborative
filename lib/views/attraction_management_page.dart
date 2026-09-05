@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import '../controllers/attraction_controller.dart';
 import '../models/attraction.dart';
 import 'add_attraction_page.dart';
-import 'bulk_attraction_import_page.dart';
 import 'admin_sidebar.dart';
-import 'admin_heritage_management_page.dart';
 import 'category_management_page.dart';
 import 'edit_attraction_page.dart';
 
@@ -97,13 +95,8 @@ class _AttractionManagementPageState
             },
 
             onCulturalHeritageTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                  const AdminCulturalHeritageManagementPage(),
-                ),
-              );
+              // Cultural information is managed inside
+              // Attraction Management.
             },
 
             onStampTap: () {},
@@ -185,23 +178,30 @@ class _AttractionManagementPageState
           constraints,
           ) {
         final bool compact =
-            constraints.maxWidth < 760;
+            constraints.maxWidth < 650;
 
         final Widget title = const Column(
           crossAxisAlignment:
           CrossAxisAlignment.start,
+
           children: [
             Text(
               'Attraction Management',
+
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
                 color: textColor,
               ),
             ),
-            SizedBox(height: 5),
+
+            SizedBox(
+              height: 5,
+            ),
+
             Text(
-              'View, add, import, edit or remove attraction details.',
+              'View, add, edit or remove attraction details.',
+
               style: TextStyle(
                 fontSize: 13,
                 color: secondaryText,
@@ -210,86 +210,38 @@ class _AttractionManagementPageState
           ],
         );
 
-        final Widget importButton =
-        OutlinedButton(
-          onPressed: _controller.isProcessing
-              ? null
-              : _openBulkImport,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: mainGreen,
-            side: const BorderSide(
-              color: mainGreen,
-            ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 22,
-              vertical: 16,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius:
-              BorderRadius.circular(7),
-            ),
-          ),
-          child: const Text(
-            'Import Attractions',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        );
-
-        final Widget coordinateButton =
-        OutlinedButton.icon(
-          onPressed: _controller.isProcessing
-              ? null
-              : _generateMissingCoordinates,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: mainGreen,
-            side: const BorderSide(
-              color: mainGreen,
-            ),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 18,
-              vertical: 16,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius:
-              BorderRadius.circular(7),
-            ),
-          ),
-          icon: const Icon(
-            Icons.add_location_alt_outlined,
-            size: 18,
-          ),
-          label: const Text(
-            'Generate Coordinates',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        );
-
         final Widget addButton =
-        ElevatedButton(
-          onPressed: _controller.isProcessing
+        ElevatedButton.icon(
+          onPressed:
+          _controller.isProcessing
               ? null
               : _openAddAttraction,
+
+          icon: const Icon(
+            Icons.add,
+            size: 20,
+          ),
+
+          label: const Text(
+            'Add New Attraction',
+          ),
+
           style: ElevatedButton.styleFrom(
             backgroundColor: mainGreen,
             foregroundColor: Colors.white,
             elevation: 0,
-            padding: const EdgeInsets.symmetric(
+
+            padding:
+            const EdgeInsets.symmetric(
               horizontal: 22,
               vertical: 16,
             ),
+
             shape: RoundedRectangleBorder(
               borderRadius:
-              BorderRadius.circular(7),
-            ),
-          ),
-          child: const Text(
-            'Add New Attraction',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
+              BorderRadius.circular(
+                7,
+              ),
             ),
           ),
         );
@@ -298,18 +250,15 @@ class _AttractionManagementPageState
           return Column(
             crossAxisAlignment:
             CrossAxisAlignment.start,
+
             children: [
               title,
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  coordinateButton,
-                  importButton,
-                  addButton,
-                ],
+
+              const SizedBox(
+                height: 14,
               ),
+
+              addButton,
             ],
           );
         }
@@ -319,10 +268,7 @@ class _AttractionManagementPageState
             Expanded(
               child: title,
             ),
-            coordinateButton,
-            const SizedBox(width: 10),
-            importButton,
-            const SizedBox(width: 10),
+
             addButton,
           ],
         );
@@ -1983,153 +1929,6 @@ class _AttractionManagementPageState
         ),
       ),
     );
-  }
-
-  // ============================================================
-  // GENERATE MISSING COORDINATES WITH HERE API
-  // ============================================================
-
-  Future<void> _generateMissingCoordinates() async {
-    if (!_controller.isHereConfigured) {
-      _showMessage(
-        'HERE API key is missing. Run the app with '
-            '--dart-define=HERE_API_KEY=YOUR_KEY.',
-        isError: true,
-      );
-      return;
-    }
-
-    final int missingCount = _controller.attractions
-        .where(
-          (item) =>
-      item.latitude == 0 || item.longitude == 0,
-    )
-        .length;
-
-    if (missingCount == 0) {
-      _showMessage(
-        'All attractions already have coordinates.',
-      );
-      return;
-    }
-
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          title: const Row(
-            children: [
-              Icon(
-                Icons.add_location_alt_outlined,
-                color: mainGreen,
-              ),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Generate Coordinates',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: Text(
-            '$missingCount attraction${missingCount == 1 ? '' : 's'} '
-                'do not have coordinates. HERE Geocoding will use each '
-                'attraction name and address to generate latitude and longitude.',
-            style: const TextStyle(
-              fontSize: 13,
-              height: 1.45,
-              color: secondaryText,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: mainGreen,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Generate'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true || !mounted) {
-      return;
-    }
-
-    try {
-      final result =
-      await _controller.geocodeAllMissingAttractions();
-
-      if (!mounted) return;
-
-      _showMessage(
-        'Coordinates completed: '
-            '${result['updated'] ?? 0} updated, '
-            '${result['failed'] ?? 0} failed, '
-            '${result['skipped'] ?? 0} skipped.',
-        isError: (result['failed'] ?? 0) > 0 &&
-            (result['updated'] ?? 0) == 0,
-      );
-    } catch (error) {
-      if (!mounted) return;
-
-      _showMessage(
-        'Unable to generate coordinates: $error',
-        isError: true,
-      );
-    }
-  }
-
-  void _showMessage(
-      String message, {
-        bool isError = false,
-      }) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor:
-        isError ? Colors.red.shade700 : mainGreen,
-      ),
-    );
-  }
-
-  // ============================================================
-  // BULK IMPORT
-  // ============================================================
-
-  Future<void> _openBulkImport() async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) =>
-        const BulkAttractionImportPage(),
-      ),
-    );
-
-    if (!mounted) {
-      return;
-    }
-
-    await _controller.loadData();
   }
 
   // ============================================================

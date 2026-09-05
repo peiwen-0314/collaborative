@@ -90,16 +90,6 @@ class AdminSidebar extends StatelessWidget {
           ),
 
           // =====================================================
-          // CULTURAL & HERITAGE MANAGEMENT
-          // =====================================================
-          sidebarItem(
-            icon: Icons.account_balance_outlined,
-            title: 'Cultural & Heritage',
-            selected: selectedPage == 'culturalHeritage',
-            onTap: onCulturalHeritageTap,
-          ),
-
-          // =====================================================
           // STAMP MANAGEMENT
           // =====================================================
           sidebarItem(

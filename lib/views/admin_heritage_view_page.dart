@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+/*import 'package:flutter/material.dart';
 
 import '../services/admin_heritage_service.dart';
 import 'admin_heritage_form_page.dart';
@@ -575,4 +575,4 @@ class AdminCulturalHeritageViewPage
       ),
     );
   }
-}
+}*/

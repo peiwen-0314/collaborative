@@ -2,7 +2,6 @@ import 'package:collaborative_asg/views/attraction_management_page.dart';
 import 'package:collaborative_asg/views/category_management_page.dart';
 import 'package:flutter/material.dart';
 
-import 'admin_heritage_management_page.dart';
 import 'admin_sidebar.dart';
 
 class AdminHomePage extends StatelessWidget {
@@ -35,7 +34,7 @@ class AdminHomePage extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (context) =>
-                      const AttractionManagementPage(),
+                  const AttractionManagementPage(),
                 ),
               );
             },
@@ -48,23 +47,14 @@ class AdminHomePage extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (context) =>
-                      const CategoryManagementPage(),
+                  const CategoryManagementPage(),
                 ),
               );
             },
 
-            // ===================================================
-            // CULTURAL & HERITAGE MANAGEMENT
-            // ===================================================
-            onCulturalHeritageTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                      const AdminCulturalHeritageManagementPage(),
-                ),
-              );
-            },
+            // Cultural & Heritage is now managed inside
+            // Attraction Management.
+            onCulturalHeritageTap: () {},
 
             // ===================================================
             // STAMP MANAGEMENT
@@ -103,11 +93,11 @@ class AdminHomePage extends StatelessWidget {
                   // =================================================
                   Row(
                     mainAxisAlignment:
-                        MainAxisAlignment.spaceBetween,
+                    MainAxisAlignment.spaceBetween,
                     children: [
                       const Column(
                         crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                        CrossAxisAlignment.start,
                         children: [
                           Text(
                             'Admin Dashboard',
@@ -187,13 +177,13 @@ class AdminHomePage extends StatelessWidget {
                             icon: Icons.place_outlined,
                             title: 'Attraction Management',
                             description:
-                                'Add, edit and manage general attractions.',
+                            'Add, edit and manage all attractions, including Cultural & Heritage.',
                             onTap: () {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) =>
-                                      const AttractionManagementPage(),
+                                  const AttractionManagementPage(),
                                 ),
                               );
                             },
@@ -206,33 +196,13 @@ class AdminHomePage extends StatelessWidget {
                             icon: Icons.category_outlined,
                             title: 'Categories Management',
                             description:
-                                'View and manage attraction categories.',
+                            'View and manage attraction categories.',
                             onTap: () {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   builder: (context) =>
-                                      const CategoryManagementPage(),
-                                ),
-                              );
-                            },
-                          ),
-
-                          // =========================================
-                          // CULTURAL & HERITAGE MANAGEMENT
-                          // =========================================
-                          dashboardCard(
-                            icon: Icons.account_balance_outlined,
-                            title:
-                                'Cultural & Heritage Management',
-                            description:
-                                'Manage heritage information.',
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) =>
-                                      const AdminCulturalHeritageManagementPage(),
+                                  const CategoryManagementPage(),
                                 ),
                               );
                             },
@@ -245,7 +215,7 @@ class AdminHomePage extends StatelessWidget {
                             icon: Icons.card_giftcard_outlined,
                             title: 'Stamp Management',
                             description:
-                                'Manage travel stamps and rewards.',
+                            'Manage travel stamps and rewards.',
                             onTap: () {
                               // Later add navigation
                             },
@@ -258,7 +228,7 @@ class AdminHomePage extends StatelessWidget {
                             icon: Icons.analytics_outlined,
                             title: 'Reports & Booking',
                             description:
-                                'View booking information and reports.',
+                            'View booking information and reports.',
                             onTap: () {
                               // Later add navigation
                             },
