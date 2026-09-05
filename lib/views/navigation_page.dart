@@ -10,6 +10,43 @@ import '../models/location_point.dart';
 import '../models/ride_option.dart';
 import '../models/transport_mode.dart';
 
+/// Google Navigation SDK's own travel mode for [mode], or null when the
+/// SDK has nothing that matches - it only knows driving/walking/cycling/
+/// taxi, with no "public transit" mode at all, so a bus/train/MRT/ferry
+/// leg (or anything this app couldn't otherwise classify) always maps to
+/// null here. Top-level (not a private method on _NavigationPageState) so
+/// [hasGoogleNavigableFirstLeg] below can reuse the exact same mapping
+/// from outside this file, rather than TripDetailsPage guessing at its
+/// own separate copy of "which modes Google can handle" that could
+/// silently drift out of sync with this one.
+NavigationTravelMode? googleTravelModeFor(TransportMode mode) =>
+    switch (mode) {
+      TransportMode.walk => NavigationTravelMode.walking,
+      TransportMode.taxi => NavigationTravelMode.taxi,
+      TransportMode.bike => NavigationTravelMode.cycling,
+      TransportMode.train ||
+      TransportMode.mrt ||
+      TransportMode.bus ||
+      TransportMode.ferry ||
+      TransportMode.other => null,
+    };
+
+/// Whether [option] even has a shot at Google turn-by-turn guidance -
+/// mirrors _NavigationPageState._selectNavigableLeg's own first-leg check
+/// (see that method's doc comment for why only the FIRST non-transfer
+/// leg matters) without needing a real Google Navigation session or
+/// GPS fix just to answer it. Lets TripDetailsPage decide NOT to open
+/// this whole full-screen native map in the first place for a trip
+/// that starts with a public-transport leg - there's nothing productive
+/// to show there but an immediate dead-end error, when staying on the
+/// trip details screen (with the real HERE itinerary already visible)
+/// is strictly more useful.
+bool hasGoogleNavigableFirstLeg(RideOption option) {
+  final legs = option.legs.where((leg) => !leg.isTransfer);
+  if (legs.isEmpty) return false;
+  return googleTravelModeFor(legs.first.mode) != null;
+}
+
 class NavigationPage extends StatefulWidget {
   const NavigationPage({
     super.key,
@@ -32,6 +69,14 @@ class _NavigationPageState extends State<NavigationPage> {
   bool _startingGuidance = false;
   bool _guidanceRunning = false;
   String? _error;
+
+  // False only for an error _startGuidance can never resolve by simply
+  // being called again (see hasGoogleNavigableFirstLeg's doc comment) -
+  // every other error here (no GPS fix yet, a transient network hiccup,
+  // location permission not granted yet...) is a real "try again" case.
+  // Drives whether the error banner below offers "Retry" (which would
+  // just reproduce the identical failure, forever) or "Back" instead.
+  bool _errorRecoverable = true;
   String? _segmentNotice;
 
   // Auto-clears _segmentNotice a few seconds after it's shown (see
@@ -148,16 +193,8 @@ class _NavigationPageState extends State<NavigationPage> {
     );
   }
 
-  NavigationTravelMode? _googleMode(TransportMode mode) => switch (mode) {
-    TransportMode.walk => NavigationTravelMode.walking,
-    TransportMode.taxi => NavigationTravelMode.taxi,
-    TransportMode.bike => NavigationTravelMode.cycling,
-    TransportMode.train ||
-    TransportMode.mrt ||
-    TransportMode.bus ||
-    TransportMode.ferry ||
-    TransportMode.other => null,
-  };
+  NavigationTravelMode? _googleMode(TransportMode mode) =>
+      googleTravelModeFor(mode);
 
   Future<void> _startGuidance() async {
     if (_startingGuidance || _guidanceRunning) return;
@@ -167,6 +204,7 @@ class _NavigationPageState extends State<NavigationPage> {
         'Google Navigation does not provide turn-by-turn guidance for this '
         'public-transport section. The HERE itinerary remains available on '
         'the trip details screen.',
+        recoverable: false,
       );
       return;
     }
@@ -258,10 +296,11 @@ class _NavigationPageState extends State<NavigationPage> {
     };
   }
 
-  void _setError(String message) {
+  void _setError(String message, {bool recoverable = true}) {
     if (!mounted) return;
     setState(() {
       _error = message;
+      _errorRecoverable = recoverable;
       _startingGuidance = false;
     });
   }
@@ -359,8 +398,19 @@ class _NavigationPageState extends State<NavigationPage> {
                 child: _NavigationMessage(
                   message: _error!,
                   color: Colors.red.shade800,
-                  actionLabel: _sessionInitialized ? 'Retry' : null,
-                  onAction: _sessionInitialized ? _startGuidance : null,
+                  // "Retry" only for an error _startGuidance could
+                  // genuinely resolve on a second attempt - offering it
+                  // for the unrecoverable "this trip starts with a
+                  // public-transport leg" case (see
+                  // hasGoogleNavigableFirstLeg) would just reproduce the
+                  // exact same message every time, so that case gets a
+                  // "Back" button (leaves this screen entirely) instead.
+                  actionLabel: !_errorRecoverable
+                      ? 'Back'
+                      : (_sessionInitialized ? 'Retry' : null),
+                  onAction: !_errorRecoverable
+                      ? _close
+                      : (_sessionInitialized ? _startGuidance : null),
                 ),
               ),
             if (_startingGuidance)
@@ -441,6 +491,161 @@ class _NavigationMessage extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A live, interactive map - not Google's guidance/turn-by-turn session
+/// (see NavigationPage for that) - showing [option]'s real route drawn
+/// as a polyline (RideOption.path; falls back to a straight line
+/// between [from]/[to] when that's empty, same convention that field's
+/// own doc comment already promises) plus the person's own live GPS
+/// position as the standard "blue dot", following them as they move.
+///
+/// Opened instead of NavigationPage whenever hasGoogleNavigableFirstLeg
+/// is false - Google's routing/guidance engine has no travel mode for a
+/// public-transport leg at all, so there is no way to get its spoken
+/// turn-by-turn or automatic maneuver detection here, but seeing where
+/// you actually are against the real route in real time doesn't need
+/// that engine - [GoogleMapsMapView] is Google Navigation SDK's plain
+/// map mode, entirely separate from GoogleMapsNavigator's guidance
+/// session (no travel mode, no setDestinations/startGuidance call, none
+/// of what fails for a bus/train in NavigationPage).
+///
+/// The route itself always draws regardless of location permission -
+/// only the live blue dot needs that, and is best-effort (see
+/// _enableLiveLocation) so a person who hasn't granted it yet still sees
+/// the real route, just without their own position on it.
+class RouteMapPage extends StatefulWidget {
+  const RouteMapPage({
+    super.key,
+    required this.from,
+    required this.to,
+    required this.option,
+  });
+
+  final LocationPoint from;
+  final LocationPoint to;
+  final RideOption option;
+
+  @override
+  State<RouteMapPage> createState() => _RouteMapPageState();
+}
+
+class _RouteMapPageState extends State<RouteMapPage> {
+  GoogleMapViewController? _controller;
+  String? _error;
+  bool _liveLocationOn = false;
+
+  bool get _isSupportedPlatform =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  Future<void> _onViewCreated(GoogleMapViewController controller) async {
+    _controller = controller;
+    try {
+      final routePoints = widget.option.path.isNotEmpty
+          ? widget.option.path
+          : [widget.from, widget.to];
+      await controller.addPolylines([
+        PolylineOptions(
+          points: [
+            for (final point in routePoints)
+              LatLng(latitude: point.lat, longitude: point.lng),
+          ],
+          strokeColor: AppColors.green,
+          strokeWidth: 5,
+        ),
+      ]);
+    } catch (error) {
+      if (mounted) setState(() => _error = 'The route could not be drawn. $error');
+    }
+    unawaited(_enableLiveLocation());
+  }
+
+  /// Turns on the real "blue dot" GPS marker for this plain map view -
+  /// entirely separate from NavigationPage's own permission flow (that
+  /// one also has to accept Google's navigation terms and initialize a
+  /// GoogleMapsNavigator session; this map needs neither, just device
+  /// location). Silently does nothing beyond leaving the route-only map
+  /// on screen if location is off, permission is denied, or the
+  /// platform doesn't support it - see this class's own doc comment for
+  /// why that's the right fallback here, not an error blocking the map.
+  Future<void> _enableLiveLocation() async {
+    if (!_isSupportedPlatform) return;
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+      await _controller?.setMyLocationEnabled(true);
+      await _controller?.followMyLocation(CameraPerspective.tilted);
+      if (mounted) setState(() => _liveLocationOn = true);
+    } catch (_) {
+      // Best-effort - the drawn route above is still shown either way.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Stack(
+        children: [
+          GoogleMapsMapView(
+            onViewCreated: _onViewCreated,
+            initialCameraPosition: CameraPosition(
+              target: LatLng(latitude: widget.from.lat, longitude: widget.from.lng),
+              zoom: 15,
+            ),
+          ),
+          Positioned(
+            left: 10,
+            top: MediaQuery.paddingOf(context).top + 8,
+            child: IconButton.filled(
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black87,
+              ),
+              onPressed: () => Navigator.of(context).pop(),
+              icon: const Icon(Icons.close),
+            ),
+          ),
+          // A one-time heads-up that this map can't spoken-guide the
+          // public-transport part of the trip - shown once, not kept
+          // permanently on screen like NavigationPage's segment notice,
+          // since there's no later moment here where it would need to
+          // reappear (unlike a multi-leg automatic hop splice).
+          if (!_liveLocationOn && _error == null)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: MediaQuery.paddingOf(context).bottom + 18,
+              child: _NavigationMessage(
+                message:
+                    'Showing the real route. Live location needs device '
+                    'GPS - no spoken turn-by-turn for public transport, '
+                    'since Google has no routing engine for that.',
+                color: AppColors.green,
+              ),
+            ),
+          if (_error != null)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: MediaQuery.paddingOf(context).bottom + 18,
+              child: _NavigationMessage(
+                message: _error!,
+                color: Colors.red.shade800,
+              ),
+            ),
+        ],
       ),
     );
   }

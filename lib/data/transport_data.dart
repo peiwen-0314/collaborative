@@ -43,7 +43,7 @@ class MockTransportRepository implements TransportRepository {
     // when running fully offline.
     await Future.delayed(const Duration(milliseconds: 350));
 
-    final distanceKm = _haversineKm(from, to);
+    final distanceKm = from.distanceKm(to);
     final seed = Object.hash(from.name, to.name, departAt.year, departAt.month, departAt.day);
     final random = Random(seed);
 
@@ -210,9 +210,16 @@ class MockTransportRepository implements TransportRepository {
         cursor = waitEnd;
       }
 
-      // Walk legs never carry the bulk of a long trip.
+      // Walk legs never carry the bulk of a long trip - and a "last
+      // mile" walk from a stop/station to the destination shouldn't run
+      // longer than a real one would either. Capped at 1.125km, which at
+      // this mode's own 4.5km/h walking speed below works out to about
+      // 15 minutes (13.5-16.5 with the timing jitter) - matches the same
+      // ~15min last-mile standard HereTransitService's own pedestrian
+      // walk radius now uses for live searches, so offline and live
+      // trips don't disagree on what a realistic last-mile walk is.
       final legDistanceKm = mode == TransportMode.walk
-          ? min(shareBase, 1.5)
+          ? min(shareBase, 1.125)
           : shareBase;
 
       final speedKmh = _speedKmh[mode]!;
@@ -446,7 +453,7 @@ const kLongWalkThresholdKm = 0.6;
 /// constant, not two separate literal strings, so RideCard's chip
 /// styling (see MiniChip's `warning` flag) reliably recognizes it
 /// wherever it was added from.
-const kRainBikeTag = 'Rain - Bike Not Ideal';
+const kRainBikeTag = 'Rain - Ride Carefully';
 
 /// Per-km rate used only for modes that genuinely *are* priced roughly
 /// per km in real life (a taxi/e-hailing fare, a bike-share's per-minute
@@ -693,19 +700,3 @@ const kCo2PerKmByMode = {
   TransportMode.other: 0.05,
 };
 
-/// Great-circle distance in kilometres between two points.
-double _haversineKm(LocationPoint a, LocationPoint b) {
-  const earthRadiusKm = 6371.0;
-  final dLat = _degToRad(b.lat - a.lat);
-  final dLng = _degToRad(b.lng - a.lng);
-  final lat1 = _degToRad(a.lat);
-  final lat2 = _degToRad(b.lat);
-
-  final h =
-      sin(dLat / 2) * sin(dLat / 2) +
-      sin(dLng / 2) * sin(dLng / 2) * cos(lat1) * cos(lat2);
-  final c = 2 * atan2(sqrt(h), sqrt(1 - h));
-  return earthRadiusKm * c;
-}
-
-double _degToRad(double deg) => deg * pi / 180;

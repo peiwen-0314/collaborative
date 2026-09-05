@@ -1,4 +1,5 @@
 import '../models/location_point.dart';
+import 'delay_estimate.dart';
 import 'transport_mode.dart';
 import 'trip_leg.dart';
 
@@ -15,6 +16,7 @@ class RideOption {
     required this.searchDepartAt,
     this.isLiveData = false,
     this.path = const [],
+    this.delayEstimate,
   });
 
   final String id;
@@ -50,6 +52,15 @@ class RideOption {
   /// straight line between the origin and destination whenever this is
   /// empty.
   final List<LocationPoint> path;
+
+  /// A rough, explicitly-labelled ESTIMATE of a possible bus delay (rain
+  /// and/or peak-hour road traffic) - see DelayEstimate's own doc
+  /// comment for why this is never presented as live tracking. Null for
+  /// an option with no scheduled bus leg, or one where neither risk
+  /// factor was present at search time - see
+  /// TransportController.searchRides, which is the only place that ever
+  /// sets this.
+  final DelayEstimate? delayEstimate;
 
   DateTime get departTime => legs.first.start;
 
@@ -144,6 +155,7 @@ class RideOption {
     'isLiveData': isLiveData,
     'path': path.map((p) => p.toJson()).toList(),
     'searchDepartAt': searchDepartAt.toIso8601String(),
+    'delayEstimate': delayEstimate?.toJson(),
   };
 
   factory RideOption.fromJson(Map<String, dynamic> json) {
@@ -169,6 +181,9 @@ class RideOption {
       searchDepartAt: json['searchDepartAt'] != null
           ? DateTime.parse(json['searchDepartAt'] as String)
           : (legs.isNotEmpty ? legs.first.start : DateTime.now()),
+      delayEstimate: json['delayEstimate'] is Map<String, dynamic>
+          ? DelayEstimate.fromJson(json['delayEstimate'] as Map<String, dynamic>)
+          : null,
     );
   }
 }

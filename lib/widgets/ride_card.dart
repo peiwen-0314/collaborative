@@ -93,6 +93,13 @@ class _RideInformation extends StatelessWidget {
           runSpacing: 3,
           children: [
             MiniChip(transferChip),
+            // Always shown (not part of shownTags' take(3) crop) - a
+            // possible-delay warning matters more than an ordinary badge
+            // like "Low Carbon", so it shouldn't be the one silently cut
+            // off the end of a long tag list. Estimated only, never a
+            // live feed - see DelayEstimate's own doc comment.
+            if (option.delayEstimate != null)
+              MiniChip(option.delayEstimate!.chipLabel, warning: true),
             for (final tag in shownTags)
               MiniChip(tag, warning: tag == kRainBikeTag),
           ],
@@ -102,13 +109,13 @@ class _RideInformation extends StatelessWidget {
           children: [
             Image.asset(AppAssets.leaf, width: 12, height: 12),
             const SizedBox(width: 3),
+            // One line instead of two separate labels - the level word
+            // and the exact figure are the same fact at two precisions,
+            // not two different facts, so they don't need their own
+            // separate text runs (previously "Low" and "CO2 0.42kg" sat
+            // side by side as if they were unrelated).
             Text(
-              option.co2Level,
-              style: const TextStyle(fontSize: 8, color: AppColors.green),
-            ),
-            const SizedBox(width: 14),
-            Text(
-              'CO₂ ${option.co2Kg.toStringAsFixed(2)}kg',
+              '${option.co2Level} CO₂ · ${option.co2Kg.toStringAsFixed(2)}kg',
               style: const TextStyle(fontSize: 8, color: AppColors.muted),
             ),
           ],

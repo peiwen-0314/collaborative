@@ -56,3 +56,32 @@ String transferCountLabel(int transferCount) {
   if (transferCount == 1) return '1 Transfer';
   return '$transferCount Transfers';
 }
+
+/// A short, human-scannable version of a full geocoded address (e.g.
+/// "Guillemard Water Treatment Plant, Mukim 17 Batu Feringgi, Penang,
+/// Malaysia" -> "Guillemard Water Treatment Plant") - just the first
+/// comma-separated segment, which is the actual place/street name;
+/// everything after it is the same kind of area/state/country
+/// boilerplate that repeats across almost every entry, and isn't what
+/// actually tells two saved trips apart at a glance. Used only for tight,
+/// one-line list rows (the Saved List preview and page) - the full
+/// [LocationPoint.name] is still what's geocoded with and shown in the
+/// From/To fields themselves, where the extra detail is genuinely useful.
+///
+/// A street address that starts with a bare house/lot number (e.g. "36,
+/// Jalan Tanjung Bungah, ...") would otherwise shorten to just "36" -
+/// technically the first comma-separated segment, but meaningless on its
+/// own. Skips a first segment that's only digits (with optional letter
+/// suffix, e.g. a lot number like "36A") and uses the next one instead,
+/// so a numbered address still shortens to its actual street/area name.
+final _bareNumberSegment = RegExp(r'^\d+[A-Za-z]?$');
+
+String shortPlaceName(String fullName) {
+  final segments = fullName.split(',').map((s) => s.trim());
+  for (final segment in segments) {
+    if (segment.isEmpty) continue;
+    if (_bareNumberSegment.hasMatch(segment)) continue;
+    return segment;
+  }
+  return fullName;
+}

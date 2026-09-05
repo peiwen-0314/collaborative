@@ -55,17 +55,24 @@ class RouteSearchResult {
 ///     sections [searchIntermodal] can return) - a personal bike a rider
 ///     already owns isn't that, so it's excluded rather than shown
 ///     alongside real bike-share and risk being mistaken for it.
-///  3. [MockTransportRepository]'s calculated generator only runs when
-///     step 2 isn't available at all - no HERE key configured, or every
-///     live call above failed outright. It's the offline fallback so the
-///     transportation module always has something to show, never a
-///     parallel system layered on top of real data.
+///  3. No fabricated fallback: when step 2 isn't available at all - no
+///     HERE key configured, or every live call above failed outright -
+///     this returns whatever real data [OsmBikeShareService] alone could
+///     still find (it queries OpenStreetMap directly, independent of
+///     HERE), or an empty result if even that found nothing. This used
+///     to fall back to MockTransportRepository's calculated/offline
+///     generator instead, so the module always showed *something* - but
+///     a fabricated route/time looked and got reported as real, which is
+///     worse than an honest "no routes found" empty state. That
+///     generator is still used elsewhere in the transportation module
+///     (see [TransportController.recommendedRideTo]'s doc comment) where
+///     there's no real alternative to fall back to at all yet - just not
+///     as a silent substitute for a real search here.
 class TransportService {
   TransportService._internal();
 
   static final TransportService instance = TransportService._internal();
 
-  final MockTransportRepository _calculated = const MockTransportRepository();
   HereTransitService? _here;
   final OsmBikeShareService _osmBike = OsmBikeShareService();
 
@@ -172,9 +179,14 @@ class TransportService {
       }
     }
 
-    // No live key, or every live call above failed outright - the only
-    // situation MockTransportRepository's calculated generator actually
-    // runs in.
+    // No live key, or every live call above failed outright. Used to
+    // fall back to MockTransportRepository's calculated/offline generator
+    // here so the module always showed *something* - deliberately
+    // removed: fabricated routes/times looked and were reported as real,
+    // which is worse than an honest empty result. OsmBikeShareService is
+    // kept - it's a real, independent OpenStreetMap query, not a mock -
+    // so a genuine real bike-share option can still surface even when
+    // HERE itself is unreachable/unconfigured.
     var osmBikeOptions = const <RideOption>[];
     try {
       osmBikeOptions = await _osmBike.searchBikeShare(
@@ -191,15 +203,12 @@ class TransportService {
       // Ignore - bike-share is a bonus, not a requirement.
     }
 
-    final calculatedOptions = await _calculated.search(
-      from: from,
-      to: to,
-      departAt: departAt,
-    );
-
     final result = RouteSearchResult(
-      options: _dedupeByMode([...calculatedOptions, ...osmBikeOptions]),
-      isLive: false,
+      options: _dedupeByMode(osmBikeOptions),
+      // True only if OsmBikeShareService actually found something real -
+      // an empty list here means no real data at all was available for
+      // this trip, not "showing something else instead".
+      isLive: osmBikeOptions.isNotEmpty,
     );
     await _writeCache(cacheKey, result);
     return result;

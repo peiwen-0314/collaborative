@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../controllers/transport_controller.dart';
 import '../core/app_theme.dart';
+import '../core/formatters.dart';
+import '../models/location_point.dart';
 import '../models/saved_trip.dart';
+import '../services/location_service.dart';
 import '../widgets/ride_card.dart';
 import 'trip_details_page.dart';
 
@@ -15,9 +18,17 @@ class SavedListPage extends StatefulWidget {
 
 class _SavedListPageState extends State<SavedListPage> {
   final TransportController _controller = TransportController();
+  final LocationService _locationService = const LocationService();
 
   List<SavedTrip>? _trips;
   String? _error;
+
+  /// Best-effort only (see _loadCurrentLocation) - null just means the
+  /// Saved List falls back to its default order (by first appearance)
+  /// instead of nearest-first. Never something that blocks or errors
+  /// the page - a person's saved trips are still the point of this
+  /// screen even when their current position can't be read.
+  LocationPoint? _currentLocation;
 
   @override
   void initState() {
@@ -28,6 +39,18 @@ class _SavedListPageState extends State<SavedListPage> {
     // every navigation back to this page would get old fast; "every
     // time the page is opened" means this initState, not every reload).
     _load().then((_) => _checkRainAndPrompt());
+    _loadCurrentLocation();
+  }
+
+  /// Fetches the person's current position purely to sort saved trips by
+  /// real proximity to it (see groupSavedTrips) - deliberately separate
+  /// from _load so a slow/denied/failed location fix never delays or
+  /// blocks showing the saved trips themselves; it just means the list
+  /// stays in its default order until this resolves, if it ever does.
+  Future<void> _loadCurrentLocation() async {
+    final result = await _locationService.detectCurrentLocation();
+    if (!mounted || result.point == null) return;
+    setState(() => _currentLocation = result.point);
   }
 
   Future<void> _load() async {
@@ -251,39 +274,60 @@ class _SavedListPageState extends State<SavedListPage> {
       );
     }
 
+    // One from/to header per real journey (see groupSavedTrips) - three
+    // different route combinations bookmarked for the same journey used
+    // to repeat "Well Mart Enterprise -> Jelutong" three times; now it's
+    // one header with all three RideCards listed under it. Sorted
+    // nearest-to-_currentLocation-first when that's known, so a saved
+    // trip actually near the person right now surfaces before ones
+    // saved from somewhere else entirely.
+    final groups = groupSavedTrips(trips, currentLocation: _currentLocation);
+
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 30),
-      itemCount: trips.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      itemCount: groups.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 22),
       itemBuilder: (context, index) {
-        final trip = trips[index];
-        return Dismissible(
-          key: ValueKey(trip.id),
-          direction: DismissDirection.endToStart,
-          onDismissed: (_) => _remove(trip),
-          background: Container(
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: 18),
-            margin: const EdgeInsets.only(top: 19),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFDECEA),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: const Icon(Icons.delete_outline, color: Colors.redAccent),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 8, bottom: 7),
-                child: Text(
-                  '${trip.from.name}  --->  ${trip.to.name}',
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
-                ),
+        final group = groups[index];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 8, bottom: 7),
+              child: Text(
+                '${shortPlaceName(group.from.name)}  →  ${shortPlaceName(group.to.name)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: AppColors.muted),
               ),
-              RideCard(option: trip.option, onTap: () => _openTrip(trip)),
+            ),
+            for (final trip in group.trips) ...[
+              Dismissible(
+                key: ValueKey(trip.id),
+                direction: DismissDirection.endToStart,
+                onDismissed: (_) => _remove(trip),
+                // No top-offset margin needed here (unlike the old
+                // header+card Dismissible) - this one wraps just the
+                // RideCard itself now that the header sits outside it,
+                // shared by the whole group, so the swipe background can
+                // simply match the card's own bounds directly.
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.only(right: 18),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFDECEA),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: const Icon(
+                    Icons.delete_outline,
+                    color: Colors.redAccent,
+                  ),
+                ),
+                child: RideCard(option: trip.option, onTap: () => _openTrip(trip)),
+              ),
+              if (trip != group.trips.last) const SizedBox(height: 10),
             ],
-          ),
+          ],
         );
       },
     );

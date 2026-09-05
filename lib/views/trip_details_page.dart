@@ -7,6 +7,7 @@ import '../core/app_assets.dart';
 import '../core/app_theme.dart';
 import '../core/formatters.dart';
 import '../data/transport_data.dart';
+import '../models/delay_estimate.dart';
 import '../models/location_point.dart';
 import '../models/ride_option.dart';
 import '../models/saved_trip.dart';
@@ -687,7 +688,28 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     await _loadLegAlternatives();
   }
 
+  /// Doesn't even open Google's own navigation view for a trip Google
+  /// can never turn-by-turn guide from its very first leg (see
+  /// hasGoogleNavigableFirstLeg's doc comment) - that used to mean a
+  /// jarring "open a whole native map screen just to immediately show a
+  /// dead-end error". Opens RouteMapPage instead: a live, GPS-tracked
+  /// map (see navigation_page.dart) with the real route drawn on it, so
+  /// the person can still see where the trip goes and follow their own
+  /// live position, even without spoken turn-by-turn for the
+  /// public-transport part of it.
   void _startNavigation() {
+    if (!hasGoogleNavigableFirstLeg(_option)) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => RouteMapPage(
+            from: widget.from,
+            to: widget.to,
+            option: _option,
+          ),
+        ),
+      );
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => NavigationPage(
@@ -996,6 +1018,10 @@ class _TripContent extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               TripSummary(option: option, from: from),
+              if (option.delayEstimate != null) ...[
+                const SizedBox(height: 10),
+                _DelayEstimateBanner(estimate: option.delayEstimate!),
+              ],
               const SizedBox(height: 22),
               if (editing && loadingAlternatives)
                 const Padding(
@@ -1035,6 +1061,64 @@ class _TripContent extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A clearly-labelled ESTIMATE banner - see DelayEstimate's own doc
+/// comment for why this can never read as a live delay/tracking feed:
+/// it always says "Estimated" and "Possible", and only ever shows a
+/// range, never a single fake-precise number.
+class _DelayEstimateBanner extends StatelessWidget {
+  const _DelayEstimateBanner({required this.estimate});
+
+  final DelayEstimate estimate;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF1E0),
+        border: Border.all(color: AppColors.orange),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.info_outline,
+            size: 15,
+            color: AppColors.orange,
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Estimated Delay: ${estimate.rangeLabel}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.orange,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Possible bus delay due to ${estimate.reasonLabel} - '
+                  'a heuristic estimate, not a live tracking feed.',
+                  style: const TextStyle(
+                    fontSize: 9,
+                    color: AppColors.muted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

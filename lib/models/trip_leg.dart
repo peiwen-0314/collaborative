@@ -14,6 +14,7 @@ class TripLeg {
     this.distanceKm,
     this.startPoint,
     this.endPoint,
+    this.encodedPolyline,
   });
 
   final TransportMode mode;
@@ -40,6 +41,21 @@ class TripLeg {
   final LocationPoint? startPoint;
   final LocationPoint? endPoint;
 
+  /// This section's real road/rail geometry, still in HERE's own
+  /// "flexible polyline" encoding - null for a leg the offline/mock
+  /// generator built (no real geometry to report) or one HERE didn't
+  /// return a polyline for. Kept as the RAW encoded string (not decoded
+  /// into points here) alongside the already-decoded points RideOption
+  /// merges into [RideOption.path] - that decoded, app-side copy is what
+  /// RouteMapPage (navigation_page.dart) actually draws with, so a bug
+  /// in this field or in HERE's own encoding can't affect the live map;
+  /// this raw copy is kept for any future use that specifically needs
+  /// HERE's own server-side decoding (e.g. its Map Image API's `line:`
+  /// overlay) instead of this app's own hand-written decoder
+  /// (here_polyline_service.dart, whose own doc comment notes it was
+  /// never confirmed against a real encoded string).
+  final String? encodedPolyline;
+
   Duration get duration => end.difference(start);
 
   Map<String, dynamic> toJson() => {
@@ -52,6 +68,7 @@ class TripLeg {
     'distanceKm': distanceKm,
     'startPoint': startPoint?.toJson(),
     'endPoint': endPoint?.toJson(),
+    'encodedPolyline': encodedPolyline,
   };
 
   factory TripLeg.fromJson(Map<String, dynamic> json) => TripLeg(
@@ -71,5 +88,6 @@ class TripLeg {
     endPoint: json['endPoint'] is Map<String, dynamic>
         ? LocationPoint.fromJson(json['endPoint'] as Map<String, dynamic>)
         : null,
+    encodedPolyline: json['encodedPolyline'] as String?,
   );
 }

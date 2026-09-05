@@ -3,6 +3,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../data/heritage_data.dart';
 import '../data/transport_data.dart';
+import '../models/delay_estimate.dart';
 import '../models/heritage_attraction.dart';
 import '../models/location_point.dart';
 import '../models/ride_option.dart';
@@ -73,6 +74,15 @@ class TransportController {
   /// discard a real option" principle as findTransitHop) but doesn't
   /// lead with it. A failed weather check just means no tag/reorder this
   /// time, same as every other best-effort real-data call in this app.
+  ///
+  /// That same rain check is also reused (no second WeatherService call)
+  /// to attach a [DelayEstimate] to any option with a scheduled bus leg
+  /// that's either searched during a weekday peak hour or affected by
+  /// that same rain - see _withDelayEstimates. This is a heuristic
+  /// estimate, never a live delay feed (no public API this module can
+  /// reach exposes real bus-delay data for Malaysian operators - see
+  /// DelayEstimate's own doc comment), so it's always labelled
+  /// "estimated"/"possible" wherever it's shown.
   Future<RouteSearchResult> searchRides({
     required LocationPoint from,
     required LocationPoint to,
@@ -85,14 +95,17 @@ class TransportController {
     );
 
     var options = result.options;
+    var isRaining = false;
     try {
       final weather = await _weatherService.checkRain(from);
-      if (weather.known && weather.isRaining) {
+      isRaining = weather.known && weather.isRaining;
+      if (isRaining) {
         options = _flagRainyBikeOptions(options);
       }
     } catch (error) {
       debugPrint('[TransportController] rain check failed: $error');
     }
+    options = _withDelayEstimates(options, isRaining: isRaining);
 
     final ranked = RouteRecommender.rank(options);
     // Keep the model's own ordering, but move every rain-flagged option
@@ -130,8 +143,47 @@ class TransportController {
             isLiveData: option.isLiveData,
             path: option.path,
             searchDepartAt: option.searchDepartAt,
+            delayEstimate: option.delayEstimate,
           ),
     ];
+  }
+
+  /// Attaches a [DelayEstimate] to every option that has a scheduled bus
+  /// leg and at least one real risk factor present (reuses the rain
+  /// check [searchRides] already made via [isRaining], instead of asking
+  /// WeatherService a second time) - see searchRides' doc comment and
+  /// DelayEstimate.evaluate. Leaves every other option untouched
+  /// (`delayEstimate` stays null).
+  List<RideOption> _withDelayEstimates(
+    List<RideOption> options, {
+    required bool isRaining,
+  }) {
+    final result = <RideOption>[];
+    for (final option in options) {
+      final estimate = DelayEstimate.evaluate(
+        option.legs,
+        isRaining: isRaining,
+      );
+      if (estimate == null) {
+        result.add(option);
+        continue;
+      }
+      result.add(
+        RideOption(
+          id: option.id,
+          title: option.title,
+          legs: option.legs,
+          estCostRm: option.estCostRm,
+          co2Kg: option.co2Kg,
+          tags: option.tags,
+          isLiveData: option.isLiveData,
+          path: option.path,
+          searchDepartAt: option.searchDepartAt,
+          delayEstimate: estimate,
+        ),
+      );
+    }
+    return result;
   }
 
   /// [RideOption] has no `copyWith` - this just rebuilds the one changed
@@ -150,6 +202,7 @@ class TransportController {
       isLiveData: top.isLiveData,
       path: top.path,
       searchDepartAt: top.searchDepartAt,
+      delayEstimate: top.delayEstimate,
     );
     return [badged, ...ranked.skip(1)];
   }

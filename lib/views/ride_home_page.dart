@@ -4,6 +4,7 @@ import '../controllers/transport_controller.dart';
 import '../core/api_config.dart';
 import '../core/app_assets.dart';
 import '../core/app_theme.dart';
+import '../core/formatters.dart';
 import '../models/location_point.dart';
 import '../models/ride_option.dart';
 import '../models/saved_trip.dart';
@@ -47,7 +48,6 @@ class _TransportationPageState extends State<TransportationPage> {
   bool _loading = false;
   String? _error;
   List<RideOption> _rideOptions = const [];
-  bool _isLiveData = false;
 
   List<SavedTrip> _savedPreview = const [];
 
@@ -141,7 +141,6 @@ class _TransportationPageState extends State<TransportationPage> {
       if (!mounted) return;
       setState(() {
         _rideOptions = result.options;
-        _isLiveData = result.isLive;
         _loading = false;
       });
     } catch (_) {
@@ -383,12 +382,7 @@ class _TransportationPageState extends State<TransportationPage> {
                       'Choose Your Ride',
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
-                    const SizedBox(height: 3),
-                    const Text(
-                      'Compare the best transportation options for your journey.',
-                      style: TextStyle(color: AppColors.muted, fontSize: 13),
-                    ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 14),
                     JourneyCard(
                       from: _from,
                       to: _to,
@@ -406,16 +400,6 @@ class _TransportationPageState extends State<TransportationPage> {
                     if (hasDestination)
                       ..._buildResultsSection()
                     else ...[
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 4),
-                        child: Text(
-                          'Search for a real destination above to see ride options.',
-                          style: TextStyle(
-                            color: AppColors.muted,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
                       if (_recommended != null) ...[
                         RecommendedPanel(
                           option: _recommended!.option,
@@ -513,7 +497,6 @@ class _TransportationPageState extends State<TransportationPage> {
     }
 
     return [
-      if (!_isLiveData) const _SimulatedDataBanner(),
       for (final option in _rideOptions) ...[
         RideCard(option: option, onTap: () => _openDetails(option)),
         const SizedBox(height: 10),
@@ -530,15 +513,24 @@ class _TransportationPageState extends State<TransportationPage> {
         ),
       ];
     }
+    // Groups the sampled preview trips the same way the full Saved List
+    // page does (see groupSavedTrips) - if two of the 3 previewed trips
+    // happen to be different route options for the same journey, this
+    // still shows one from/to header for them instead of repeating it.
+    final groups = groupSavedTrips(_savedPreview);
     return [
-      for (final trip in _savedPreview) ...[
+      for (final group in groups) ...[
         Text(
-          '${trip.from.name}  --->  ${trip.to.name}',
+          '${shortPlaceName(group.from.name)}  →  ${shortPlaceName(group.to.name)}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
           style: const TextStyle(color: AppColors.muted, fontSize: 12),
         ),
         const SizedBox(height: 5),
-        RideCard(option: trip.option, onTap: () => _openSavedTrip(trip)),
-        const SizedBox(height: 10),
+        for (final trip in group.trips) ...[
+          RideCard(option: trip.option, onTap: () => _openSavedTrip(trip)),
+          const SizedBox(height: 10),
+        ],
       ],
     ];
   }
@@ -554,50 +546,6 @@ class _TransportationPageState extends State<TransportationPage> {
 /// the same offline generator the rest of the app falls back to - a
 /// placeholder until the travel-plan module a teammate is building can
 /// supply a real pick.
-/// Shown above the ride options whenever they came from the offline mock
-/// generator instead of the live HERE API - which is what happens by
-/// default, since [ApiConfig.hasHereApiKey] is false unless the app was
-/// built/run with a real key. Made deliberately hard to miss (unlike the
-/// small grey footnote this replaces) because the times, waits, and even
-/// which vehicles are "available" below are an estimate, not a real
-/// timetable, until a key is configured.
-class _SimulatedDataBanner extends StatelessWidget {
-  const _SimulatedDataBanner();
-
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppColors.orange.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.orange.withValues(alpha: 0.45)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.info_outline, size: 16, color: AppColors.orange),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Text(
-              'Simulated routes - no live HERE API key is set up, so these '
-                  'times and waits are an estimate, not a real timetable. Run '
-                  'with --dart-define=HERE_API_KEY=... for real schedules.',
-              style: TextStyle(
-                fontSize: 11,
-                color: AppColors.text,
-                height: 1.3,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class RecommendedPanel extends StatelessWidget {
   const RecommendedPanel({
     super.key,
@@ -623,10 +571,6 @@ class RecommendedPanel extends StatelessWidget {
           const Text(
             'Recommended For you',
             style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-          ),
-          const Text(
-            'Based on your travel plan and preferences.',
-            style: TextStyle(fontSize: 8, color: AppColors.muted),
           ),
           const SizedBox(height: 8),
           RideCard(option: option, onTap: onTap, featured: true),

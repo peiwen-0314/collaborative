@@ -54,6 +54,15 @@ class HereTransitService implements TransportRepository {
   /// which neither of the two APIs above ever returns.
   static const _routingBaseUrl = 'https://router.hereapi.com/v8/routes';
 
+  // Tried first on every search - most real trips have a usable stop
+  // within this radius, and it keeps the "last mile" walk realistic
+  // (~1125m at this speed is about 15 minutes, matching the standard the
+  // rest of this app - offline and live - uses for a last-mile walk).
+  static const _tightPedestrianParams = {
+    'pedestrian[maxDistance]': '1125',
+    'pedestrian[speed]': '1.25',
+  };
+
   @override
   Future<List<RideOption>> search({
     required LocationPoint from,
@@ -64,6 +73,47 @@ class HereTransitService implements TransportRepository {
       throw HereApiException('No HERE_API_KEY configured.');
     }
 
+    try {
+      return await _fetchRoutes(
+        from: from,
+        to: to,
+        departAt: departAt,
+        pedestrianParams: _tightPedestrianParams,
+      );
+    } on HereApiException catch (error) {
+      // Only retry for "genuinely no route exists within the tight
+      // radius" - a network/parse/HTTP failure should surface as-is
+      // rather than being masked by a second doomed attempt.
+      if (error.message != 'HERE returned no routes.') rethrow;
+    }
+
+    // The tight ~1125m radius above found no usable stop for this
+    // specific trip (a real possibility - not every address is near
+    // transit). Retrying with HERE's own wider default (2000m/1m/s,
+    // walks up to ~33 minutes) trades "short walk" for "still real
+    // data" - TransportService.search's caller only falls back to
+    // MockTransportRepository's offline generator when every live call
+    // fails outright, and a route that merely needs a longer walk than
+    // this app would prefer is still a real HERE result, not a reason to
+    // give up on live data entirely.
+    return _fetchRoutes(
+      from: from,
+      to: to,
+      departAt: departAt,
+      pedestrianParams: const {},
+    );
+  }
+
+  /// Shared HTTP call + parse for the main transit search - factored out
+  /// of [search] so it can be tried twice with different pedestrian
+  /// constraints (see [search]'s own doc comment) without duplicating the
+  /// request/parse plumbing.
+  Future<List<RideOption>> _fetchRoutes({
+    required LocationPoint from,
+    required LocationPoint to,
+    required DateTime departAt,
+    required Map<String, String> pedestrianParams,
+  }) async {
     final uri = Uri.parse(_baseUrl).replace(
       queryParameters: {
         'origin': from.coordinateString,
@@ -76,6 +126,7 @@ class HereTransitService implements TransportRepository {
         // Without this, HERE only returns its single best route - ask for
         // extra alternatives so the UI has more than one option to show.
         'alternatives': '5',
+        ...pedestrianParams,
         'apiKey': ApiConfig.hereApiKey,
       },
     );
@@ -293,11 +344,12 @@ class HereTransitService implements TransportRepository {
       departAt: departAt,
       extraParams: const {
         'rented[modes]': 'bicycle',
-        // A slightly tighter walk radius than the API's own 2000m
-        // default, to match the ~1.2-1.5km walk assumption the rest of
-        // this app already uses elsewhere (see OsmBikeShareService /
-        // RealTransitStopService).
-        'pedestrian[maxDistance]': '1500',
+        // Tighter than the API's own 2000m/1m/s default, to match the
+        // ~1125m/15min last-mile walk this app treats as realistic
+        // everywhere else (see the main search() call above and
+        // MockTransportRepository's own walk cap).
+        'pedestrian[maxDistance]': '1125',
+        'pedestrian[speed]': '1.25',
       },
       idPrefix: 'here-intermodal',
       logTag: 'searchIntermodal',
@@ -469,6 +521,12 @@ class HereTransitService implements TransportRepository {
       // but renders green (or vice versa) previously read as a bug.
       final isWalkTransfer = isWalk && i != 0 && i != sections.length - 1;
 
+      // Kept as the raw string (not just fed through the decoder below)
+      // so TripLeg.encodedPolyline can hand it straight to HERE's own
+      // Map Image API later - see that field's own doc comment for why
+      // that deliberately bypasses this app's own polyline decoder.
+      final polyline = section['polyline'] as String?;
+
       legs.add(
         TripLeg(
           mode: mode,
@@ -488,6 +546,7 @@ class HereTransitService implements TransportRepository {
           distanceKm: km,
           startPoint: startPoint,
           endPoint: endPoint,
+          encodedPolyline: polyline,
         ),
       );
       totalCostRm += estimateFareRm(
@@ -500,8 +559,10 @@ class HereTransitService implements TransportRepository {
 
       // Real road/rail geometry for this section, if HERE returned one -
       // best-effort only, see here_polyline_service.dart for why this is
-      // wrapped so defensively.
-      final polyline = section['polyline'] as String?;
+      // wrapped so defensively. (This decoded copy still only feeds
+      // RideOption.path/the fallback-to-straight-line logic - see
+      // TripLeg.encodedPolyline's own doc comment for the separate raw
+      // copy kept above.)
       if (polyline != null) {
         try {
           final decoded = decodeHereFlexiblePolyline(polyline);
