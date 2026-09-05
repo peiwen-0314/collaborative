@@ -104,12 +104,12 @@ class _CategoryManagementPageState
             },
 
             onCategoryTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const CategoryManagementPage(),
-                ),
-              );
+              // Already on Category Management.
+            },
+
+            onCulturalHeritageTap: () {
+              // Cultural & Heritage is managed through
+              // Attraction Management now.
             },
 
             onStampTap: () {},

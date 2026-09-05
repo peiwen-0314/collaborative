@@ -5,6 +5,7 @@ import '../widgets/eco_bottom_navigation.dart';
 
 import 'generated_trip_page.dart';
 import 'home_page.dart';
+import 'ride_home_page.dart';
 import 'trip_location_date_page.dart';
 import 'trip_travel_style_page.dart';
 import 'trip_travelers_page.dart';
@@ -93,6 +94,15 @@ class _AiTripPlannerPageState extends State<AiTripPlannerPage> {
       context,
       MaterialPageRoute(
         builder: (_) => const HomePage(),
+      ),
+    );
+  }
+
+  void _goTransport() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const TransportationPage(),
       ),
     );
   }
@@ -206,9 +216,8 @@ class _AiTripPlannerPageState extends State<AiTripPlannerPage> {
       bottomNavigationBar: EcoBottomNavigation(
         currentIndex: 2,
         onHomeTap: _goHome,
-        onTransportTap: () {
-          _showComingSoon('Transport');
-        },
+        onTransportTap: _goTransport,
+
         onPlanTripTap: () {
           // Already on AI Trip Planner page.
         },

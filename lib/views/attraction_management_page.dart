@@ -94,6 +94,11 @@ class _AttractionManagementPageState
               );
             },
 
+            onCulturalHeritageTap: () {
+              // Cultural information is managed inside
+              // Attraction Management.
+            },
+
             onStampTap: () {},
 
             onReportTap: () {},

@@ -2,10 +2,17 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../controllers/home_controller.dart';
+import '../controllers/personalization_controller.dart';
 import '../models/attraction.dart';
+import '../services/heritage_nearby_service.dart';
 import '../widgets/eco_bottom_navigation.dart';
 
 import 'ai_trip_planner_page.dart';
+import 'attraction_detail_page.dart';
+import 'attraction_search_page.dart';
+import 'cultural_heritage_page.dart';
+import 'heritage_detail_page.dart';
+import 'ride_home_page.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback? onTransportTap;
@@ -48,9 +55,16 @@ class _HomePageState extends State<HomePage> {
   final MobileHomeController _controller =
   MobileHomeController();
 
-  final TextEditingController
-  _searchController =
-  TextEditingController();
+  final PersonalizationController
+  _personalizationController =
+  PersonalizationController();
+
+  static bool _popupShownThisRun = false;
+
+  final HeritageNearbyService _nearbyService =
+  HeritageNearbyService();
+
+  bool _nearbyPopupVisible = false;
 
   // ============================================================
   // INIT
@@ -64,7 +78,16 @@ class _HomePageState extends State<HomePage> {
       _refreshPage,
     );
 
+    _personalizationController.addListener(
+      _refreshPage,
+    );
+
     _controller.loadHomeData();
+    _personalizationController.loadRecommendations();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showNearbyPopupOncePerRun();
+    });
   }
 
   void _refreshPage() {
@@ -72,6 +95,408 @@ class _HomePageState extends State<HomePage> {
       setState(() {});
     }
   }
+
+  Future<void> _refreshHome() async {
+    await Future.wait([
+      _controller.refresh(),
+      _personalizationController
+          .refreshRecommendations(),
+    ]);
+  }
+
+  Future<void> _showNearbyPopupOncePerRun() async {
+    if (_popupShownThisRun || !mounted) {
+      return;
+    }
+
+    _popupShownThisRun = true;
+
+    try {
+      // Large test radius so a result can be found from TAR UMT.
+      // Results are sorted nearest-first by HeritageNearbyService.
+      final results = await _nearbyService.findNearby(
+        radiusMeters: 1000000,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (results.isEmpty) {
+        debugPrint(
+          'No heritage attraction available for popup test.',
+        );
+        return;
+      }
+
+      await _showNearbyPopup(results.first);
+    } catch (error) {
+      debugPrint(
+        'Nearby popup test error: $error',
+      );
+    }
+  }
+
+  Future<void> _showNearbyPopup(
+      NearbyHeritageResult result,
+      ) async {
+    if (!mounted || _nearbyPopupVisible) {
+      return;
+    }
+
+    final route = ModalRoute.of(context);
+
+    if (route != null && !route.isCurrent) {
+      return;
+    }
+
+    _nearbyPopupVisible = true;
+
+    final attraction = result.attraction;
+    final distance = result.distanceMeters.round();
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierColor: Colors.black54,
+        builder: (dialogContext) {
+          return Dialog(
+            elevation: 8,
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 26,
+              vertical: 30,
+            ),
+            child: Container(
+              width: double.infinity,
+              constraints: const BoxConstraints(
+                maxWidth: 360,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x26000000),
+                    blurRadius: 18,
+                    offset: Offset(0, 7),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // =====================================================
+                  // TOP IMAGE
+                  // =====================================================
+                  Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(20),
+                        ),
+                        child: Image.asset(
+                          'assets/images/nearby_popup.png',
+                          width: double.infinity,
+                          height: 165,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+
+                      Positioned(
+                        top: 9,
+                        right: 9,
+                        child: InkWell(
+                          onTap: () {
+                            Navigator.of(dialogContext).pop();
+                          },
+                          customBorder: const CircleBorder(),
+                          child: Container(
+                            width: 27,
+                            height: 27,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Color(0x22000000),
+                                  blurRadius: 5,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.close,
+                              size: 15,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  // =====================================================
+                  // CONTENT
+                  // =====================================================
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      17,
+                      14,
+                      17,
+                      16,
+                    ),
+                    child: Column(
+                      children: [
+                        Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: '${attraction.name}\nis just ',
+                                style: const TextStyle(
+                                  color: Colors.black87,
+                                  fontSize: 17,
+                                  height: 1.28,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              TextSpan(
+                                text: '$distance m',
+                                style: const TextStyle(
+                                  color: Color(0xFF2E7D32),
+                                  fontSize: 17,
+                                  height: 1.28,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const TextSpan(
+                                text: ' away!',
+                                style: TextStyle(
+                                  color: Colors.black87,
+                                  fontSize: 17,
+                                  height: 1.28,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+
+                        const SizedBox(height: 8),
+
+                        Text(
+                          attraction.shortDescription.isNotEmpty
+                              ? attraction.shortDescription
+                              : 'A historic landmark nearby. '
+                              'Discover its rich history and culture.',
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Color(0xFF777777),
+                            fontSize: 11,
+                            height: 1.4,
+                          ),
+                        ),
+
+                        const SizedBox(height: 14),
+
+                        // =================================================
+                        // DISTANCE + VISIT TIME
+                        // =================================================
+                        Container(
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF2FAF2),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: const Color(0xFFD6E8D6),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 11,
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      const Icon(
+                                        Icons.location_on_outlined,
+                                        color: mainGreen,
+                                        size: 17,
+                                      ),
+                                      const SizedBox(height: 3),
+                                      const Text(
+                                        'Distance',
+                                        style: TextStyle(
+                                          color: Color(0xFF2E7D32),
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '$distance m',
+                                        style: const TextStyle(
+                                          color: mainGreen,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+
+                              Container(
+                                width: 1,
+                                height: 54,
+                                color: const Color(0xFFD6E8D6),
+                              ),
+
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 11,
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      const Icon(
+                                        Icons.access_time_rounded,
+                                        color: mainGreen,
+                                        size: 17,
+                                      ),
+                                      const SizedBox(height: 3),
+                                      const Text(
+                                        'Est. Visit Time',
+                                        style: TextStyle(
+                                          color: Color(0xFF777777),
+                                          fontSize: 9,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        attraction.recommendedTime.isNotEmpty
+                                            ? attraction.recommendedTime
+                                            : '1 - 2 hours',
+                                        textAlign: TextAlign.center,
+                                        style: const TextStyle(
+                                          color: mainGreen,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // =================================================
+                        // BUTTONS
+                        // =================================================
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: () {
+                                  Navigator.of(dialogContext).pop();
+                                },
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: mainGreen,
+                                  side: const BorderSide(
+                                    color: mainGreen,
+                                    width: 1,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 11,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Maybe Later',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(width: 9),
+
+                            Expanded(
+                              child: FilledButton(
+                                onPressed: () {
+                                  Navigator.of(dialogContext).pop();
+
+                                  if (!mounted) {
+                                    return;
+                                  }
+
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) =>
+                                          HeritageDetailPage(
+                                            attraction: attraction,
+                                          ),
+                                    ),
+                                  );
+                                },
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: mainGreen,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 11,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: const Row(
+                                  mainAxisAlignment:
+                                  MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      'Explore Now',
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    SizedBox(width: 4),
+                                    Icon(
+                                      Icons.chevron_right,
+                                      size: 15,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    } finally {
+      _nearbyPopupVisible = false;
+    }
+  }
+
 
   void _openAiTripPlanner() {
     Navigator.push(
@@ -82,14 +507,27 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openTransportation() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const TransportationPage(),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _controller.removeListener(
       _refreshPage,
     );
 
+    _personalizationController.removeListener(
+      _refreshPage,
+    );
+
     _controller.dispose();
-    _searchController.dispose();
+    _personalizationController.dispose();
 
     super.dispose();
   }
@@ -107,7 +545,7 @@ class _HomePageState extends State<HomePage> {
         bottom: false,
         child: RefreshIndicator(
           color: mainGreen,
-          onRefresh: _controller.refresh,
+          onRefresh: _refreshHome,
 
           child: SingleChildScrollView(
             physics:
@@ -181,7 +619,7 @@ class _HomePageState extends State<HomePage> {
           // Already on Home Page.
         },
 
-        onTransportTap: widget.onTransportTap,
+        onTransportTap: _openTransportation,
 
         onPlanTripTap: _openAiTripPlanner,
 
@@ -202,37 +640,13 @@ class _HomePageState extends State<HomePage> {
         Row(
           children: [
             // Logo
-            Row(
-              children: [
-                const Icon(
-                  Icons.luggage_rounded,
-                  color: mainGreen,
-                  size: 25,
-                ),
-
-                Transform.translate(
-                  offset:
-                  const Offset(-7, 7),
-                  child: const Icon(
-                    Icons.eco,
-                    color: mainGreen,
-                    size: 17,
-                  ),
-                ),
-
-                const SizedBox(width: 1),
-
-                const Text(
-                  'EcoTravel',
-                  style: TextStyle(
-                    color: mainGreen,
-                    fontSize: 21,
-                    fontWeight:
-                    FontWeight.w700,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-              ],
+            Transform.translate(
+              offset: const Offset(-7, 0),
+              child: Image.asset(
+                'assets/images/logo.png',
+                height: 55,
+                fit: BoxFit.contain,
+              ),
             ),
 
             const Spacer(),
@@ -329,71 +743,58 @@ class _HomePageState extends State<HomePage> {
   // ============================================================
 
   Widget _searchBar() {
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius:
-        BorderRadius.circular(11),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(
-              alpha: 0.09,
+    return InkWell(
+      onTap: _openAttractionSearch,
+      borderRadius: BorderRadius.circular(11),
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(
+          horizontal: 14,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(11),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: 0.09,
+              ),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
+          ],
+        ),
+        child: const Row(
+          children: [
+            Icon(
+              Icons.search,
+              size: 21,
+              color: Color(0xFF999999),
+            ),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Search attractions...',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: Color(0xFFAAAAAA),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
 
-      child: TextField(
-        controller: _searchController,
-
-        textInputAction:
-        TextInputAction.search,
-
-        style: const TextStyle(
-          fontSize: 12,
+  void _openAttractionSearch() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AttractionSearchPage(
+          personalizationController:
+          _personalizationController,
         ),
-
-        decoration: InputDecoration(
-          border: InputBorder.none,
-
-          contentPadding:
-          const EdgeInsets.symmetric(
-            vertical: 14,
-          ),
-
-          prefixIcon: const Icon(
-            Icons.search,
-            size: 21,
-            color: Color(0xFF999999),
-          ),
-
-          hintText:
-          'Search destination, eco-activities, guides...',
-
-          hintStyle:
-          const TextStyle(
-            fontSize: 10.5,
-            color: Color(0xFFAAAAAA),
-          ),
-
-          suffixIcon: IconButton(
-            onPressed: () {
-              _showFilterSheet();
-            },
-            icon: const Icon(
-              Icons.tune_rounded,
-              color: mainGreen,
-              size: 20,
-            ),
-          ),
-        ),
-
-        onSubmitted: (value) {
-          _searchAttraction(value);
-        },
       ),
     );
   }
@@ -724,7 +1125,14 @@ class _HomePageState extends State<HomePage> {
               const Color(
                 0xFFEDE0F8,
               ),
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CulturalHeritagePage(),
+                  ),
+                );
+              },
             ),
           ),
 
@@ -907,7 +1315,8 @@ class _HomePageState extends State<HomePage> {
   // ============================================================
 
   Widget _recommendationSection() {
-    if (_controller.isLoading) {
+    if (_controller.isLoading ||
+        _personalizationController.isLoadingRecommendations) {
       return const SizedBox(
         height: 99,
         child: Center(
@@ -920,7 +1329,7 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    if (_controller
+    if (_personalizationController
         .recommendedAttractions
         .isEmpty) {
       return Container(
@@ -951,7 +1360,7 @@ class _HomePageState extends State<HomePage> {
         scrollDirection:
         Axis.horizontal,
 
-        itemCount: _controller
+        itemCount: _personalizationController
             .recommendedAttractions
             .length,
 
@@ -964,7 +1373,7 @@ class _HomePageState extends State<HomePage> {
         itemBuilder:
             (context, index) {
           final attraction =
-          _controller
+          _personalizationController
               .recommendedAttractions[
           index];
 
@@ -998,7 +1407,18 @@ class _HomePageState extends State<HomePage> {
 
       child: GestureDetector(
         onTap: () {
-          // Attraction details navigation later.
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AttractionDetailPage(
+                attraction: attraction,
+              ),
+            ),
+          );
+
+          _personalizationController.recordView(
+            attraction,
+          );
         },
 
         child: Column(
@@ -1108,24 +1528,17 @@ class _HomePageState extends State<HomePage> {
 
             const Spacer(),
 
-            const Row(
-              children: [
-                Icon(
-                  Icons.eco,
-                  size: 8,
-                  color: mainGreen,
-                ),
-                SizedBox(width: 2),
-                Text(
-                  'Low Impact',
-                  style: TextStyle(
-                    fontSize: 6.5,
-                    color: mainGreen,
-                    fontWeight:
-                    FontWeight.w600,
-                  ),
-                ),
-              ],
+            Text(
+              attraction.categoryName.isEmpty
+                  ? 'Attraction'
+                  : attraction.categoryName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 6.5,
+                color: mainGreen,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ],
         ),
@@ -1415,313 +1828,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ],
-    );
-  }
-
-  // ============================================================
-  // SEARCH
-  // ============================================================
-
-  void _searchAttraction(
-      String keyword,
-      ) {
-    final search =
-    keyword.trim().toLowerCase();
-
-    if (search.isEmpty) {
-      return;
-    }
-
-    final result = _controller
-        .recommendedAttractions
-        .where(
-          (item) =>
-      item.name
-          .toLowerCase()
-          .contains(search) ||
-          item.state
-              .toLowerCase()
-              .contains(search) ||
-          item.area
-              .toLowerCase()
-              .contains(search) ||
-          item.categoryName
-              .toLowerCase()
-              .contains(search),
-    )
-        .toList();
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor:
-      Colors.transparent,
-      isScrollControlled: true,
-
-      builder: (context) {
-        return SafeArea(
-          child: Container(
-            constraints:
-            BoxConstraints(
-              maxHeight:
-              MediaQuery.sizeOf(
-                context,
-              ).height *
-                  0.70,
-            ),
-
-            padding:
-            const EdgeInsets.all(
-              18,
-            ),
-
-            decoration:
-            const BoxDecoration(
-              color: Colors.white,
-              borderRadius:
-              BorderRadius.vertical(
-                top: Radius.circular(
-                  22,
-                ),
-              ),
-            ),
-
-            child: Column(
-              mainAxisSize:
-              MainAxisSize.min,
-
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
-
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Search results for "$keyword"',
-                        maxLines: 1,
-                        overflow:
-                        TextOverflow
-                            .ellipsis,
-                        style:
-                        const TextStyle(
-                          fontSize: 16,
-                          fontWeight:
-                          FontWeight
-                              .w700,
-                        ),
-                      ),
-                    ),
-
-                    IconButton(
-                      onPressed: () =>
-                          Navigator.pop(
-                            context,
-                          ),
-                      icon:
-                      const Icon(
-                        Icons.close,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(
-                    height: 8),
-
-                if (result.isEmpty)
-                  const Padding(
-                    padding:
-                    EdgeInsets
-                        .symmetric(
-                      vertical: 30,
-                    ),
-                    child: Center(
-                      child: Text(
-                        'No attraction found.',
-                      ),
-                    ),
-                  )
-                else
-                  Flexible(
-                    child:
-                    ListView.separated(
-                      shrinkWrap: true,
-
-                      itemCount:
-                      result.length,
-
-                      separatorBuilder:
-                          (
-                          context,
-                          index,
-                          ) =>
-                      const Divider(
-                        height: 1,
-                      ),
-
-                      itemBuilder:
-                          (
-                          context,
-                          index,
-                          ) {
-                        final item =
-                        result[
-                        index];
-
-                        return ListTile(
-                          contentPadding:
-                          EdgeInsets
-                              .zero,
-
-                          leading:
-                          const CircleAvatar(
-                            backgroundColor:
-                            lightGreen,
-                            child: Icon(
-                              Icons.place,
-                              color:
-                              mainGreen,
-                            ),
-                          ),
-
-                          title: Text(
-                            item.name,
-                            maxLines: 1,
-                            overflow:
-                            TextOverflow
-                                .ellipsis,
-                          ),
-
-                          subtitle:
-                          Text(
-                            _attractionLocation(
-                              item,
-                            ),
-                            maxLines: 1,
-                            overflow:
-                            TextOverflow
-                                .ellipsis,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  // ============================================================
-  // FILTER
-  // ============================================================
-
-  void _showFilterSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor:
-      Colors.transparent,
-
-      builder: (context) {
-        return SafeArea(
-          child: Container(
-            padding:
-            const EdgeInsets.all(
-              20,
-            ),
-
-            decoration:
-            const BoxDecoration(
-              color: Colors.white,
-              borderRadius:
-              BorderRadius.vertical(
-                top: Radius.circular(
-                  22,
-                ),
-              ),
-            ),
-
-            child: Column(
-              mainAxisSize:
-              MainAxisSize.min,
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
-
-              children: [
-                const Text(
-                  'Explore Filters',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight:
-                    FontWeight.w700,
-                  ),
-                ),
-
-                const SizedBox(
-                    height: 15),
-
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-
-                  children: [
-                    _filterChip(
-                      'Cultural',
-                    ),
-                    _filterChip(
-                      'Nature',
-                    ),
-                    _filterChip(
-                      'Heritage',
-                    ),
-                    _filterChip(
-                      'Eco Activities',
-                    ),
-                    _filterChip(
-                      'Low Impact',
-                    ),
-                  ],
-                ),
-
-                const SizedBox(
-                    height: 20),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _filterChip(
-      String text,
-      ) {
-    return Container(
-      padding:
-      const EdgeInsets.symmetric(
-        horizontal: 13,
-        vertical: 8,
-      ),
-
-      decoration: BoxDecoration(
-        color: lightGreen,
-        borderRadius:
-        BorderRadius.circular(
-          20,
-        ),
-      ),
-
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: mainGreen,
-          fontSize: 11,
-          fontWeight:
-          FontWeight.w500,
-        ),
-      ),
     );
   }
 }

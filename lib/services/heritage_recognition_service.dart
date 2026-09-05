@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+
 import '../models/heritage_attraction.dart';
 import 'heritage_firestore_service.dart';
 
@@ -17,18 +18,30 @@ class HeritageRecognitionResult {
 }
 
 class HeritageRecognitionService {
-  HeritageRecognitionService({HeritageFirestoreService? firestoreService})
-      : _firestoreService = firestoreService ?? HeritageFirestoreService();
+  HeritageRecognitionService({
+    HeritageFirestoreService? firestoreService,
+  }) : _firestoreService =
+      firestoreService ?? HeritageFirestoreService();
 
-  static const String baseUrl = 'http://10.0.2.2:8000';
+  // Real Android phone
+  static const String baseUrl = 'http://192.168.100.90:8000';
+
   final HeritageFirestoreService _firestoreService;
 
-  Future<HeritageRecognitionResult> recognize(File imageFile) async {
+  Future<HeritageRecognitionResult> recognize(
+      File imageFile,
+      ) async {
     final request = http.MultipartRequest(
       'POST',
       Uri.parse('$baseUrl/recognize'),
     );
-    final extension = imageFile.path.split('.').last.toLowerCase();
+
+    // ============================================================
+    // DETERMINE IMAGE TYPE
+    // ============================================================
+
+    final extension =
+    imageFile.path.split('.').last.toLowerCase();
 
     MediaType contentType;
 
@@ -36,14 +49,21 @@ class HeritageRecognitionService {
       case 'png':
         contentType = MediaType('image', 'png');
         break;
+
       case 'webp':
         contentType = MediaType('image', 'webp');
         break;
+
       case 'jpeg':
       case 'jpg':
       default:
         contentType = MediaType('image', 'jpeg');
+        break;
     }
+
+    // ============================================================
+    // ADD IMAGE TO REQUEST
+    // ============================================================
 
     request.files.add(
       await http.MultipartFile.fromPath(
@@ -52,23 +72,60 @@ class HeritageRecognitionService {
         contentType: contentType,
       ),
     );
-    final streamed = await request.send().timeout(const Duration(seconds: 45));
-    final response = await http.Response.fromStream(streamed);
+
+    // ============================================================
+    // SEND TO FASTAPI BACKEND
+    // ============================================================
+
+    final streamedResponse = await request
+        .send()
+        .timeout(
+      const Duration(seconds: 90),
+    );
+
+    final response =
+    await http.Response.fromStream(streamedResponse);
+
+    // ============================================================
+    // CHECK BACKEND RESPONSE
+    // ============================================================
 
     if (response.statusCode != 200) {
       throw Exception(
-        'Recognition server returned ${response.statusCode}: ${response.body}',
+        'Recognition server returned '
+            '${response.statusCode}: ${response.body}',
       );
     }
 
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    final candidates = (data['candidate_names'] as List<dynamic>? ?? <dynamic>[])
+    // ============================================================
+    // PARSE JSON
+    // ============================================================
+
+    final data =
+    jsonDecode(response.body) as Map<String, dynamic>;
+
+    final candidates =
+    (data['candidate_names'] as List<dynamic>? ??
+        <dynamic>[])
         .map((value) => value.toString())
-        .where((value) => value.trim().isNotEmpty)
+        .where(
+          (value) => value.trim().isNotEmpty,
+    )
         .toList();
 
+    // ============================================================
+    // MATCH GOOGLE VISION RESULT WITH FIRESTORE
+    // ============================================================
+
     final attraction =
-    await _firestoreService.findByVisionCandidates(candidates);
+    await _firestoreService
+        .findByVisionCandidates(
+      candidates,
+    );
+
+    // ============================================================
+    // RETURN RESULT
+    // ============================================================
 
     return HeritageRecognitionResult(
       candidates: candidates,

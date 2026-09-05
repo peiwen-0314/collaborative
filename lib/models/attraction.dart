@@ -42,6 +42,8 @@ class AttractionModel {
   // ============================================================
 
   final String address;
+  final double latitude;
+  final double longitude;
   final String phoneNumber;
 
   // ============================================================
@@ -88,6 +90,8 @@ class AttractionModel {
     required this.closingTime,
     required this.recommendedDuration,
     required this.address,
+    this.latitude = 0,
+    this.longitude = 0,
     required this.phoneNumber,
     required this.facilities,
     required this.highlights,
@@ -303,6 +307,12 @@ class AttractionModel {
           .toString()
           .trim(),
 
+      latitude:
+      number('latitude'),
+
+      longitude:
+      number('longitude'),
+
       phoneNumber:
       (data['phoneNumber'] ?? '')
           .toString()
@@ -443,6 +453,12 @@ class AttractionModel {
       'address':
       address.trim(),
 
+      'latitude':
+      latitude,
+
+      'longitude':
+      longitude,
+
       'phoneNumber':
       phoneNumber.trim(),
 
@@ -503,6 +519,8 @@ class AttractionModel {
     String? closingTime,
     String? recommendedDuration,
     String? address,
+    double? latitude,
+    double? longitude,
     String? phoneNumber,
     List<String>? facilities,
     List<String>? highlights,
@@ -579,6 +597,14 @@ class AttractionModel {
       address:
       address ??
           this.address,
+
+      latitude:
+      latitude ??
+          this.latitude,
+
+      longitude:
+      longitude ??
+          this.longitude,
 
       phoneNumber:
       phoneNumber ??
