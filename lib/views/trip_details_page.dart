@@ -102,6 +102,8 @@ class TripDetailsPage extends StatefulWidget {
     required this.to,
     required this.option,
     this.allowTimeChange = false,
+    this.isPlanLeg = false,
+    this.onChangeFrom,
   });
 
   final LocationPoint from;
@@ -116,6 +118,23 @@ class TripDetailsPage extends StatefulWidget {
   /// here rather than being frozen at whatever it was first saved with.
   /// See SavedListPage._openTrip/_changeDepartureTime.
   final bool allowTimeChange;
+
+  /// True only when this page was opened for one leg of a saved trip
+  /// PLAN (see PlanTransportPage._openLeg) - makes the From row itself
+  /// tappable to change the starting point (see [onChangeFrom]) right
+  /// here in the detail page, instead of some separate inline control
+  /// elsewhere. Never true for a normal ad-hoc search/Saved List trip,
+  /// which has no "plan" behind it for a changed starting point to be
+  /// re-saved against.
+  final bool isPlanLeg;
+
+  /// Required whenever [isPlanLeg] is true - re-geocodes a place the
+  /// person typed and retries planning this exact leg from there (see
+  /// PlanTransportPage._searchAndRetry), returning the resulting
+  /// (possibly still-unplanned) leg so this page can show the new route
+  /// or explain why there still isn't one. Null for a normal trip,
+  /// where the From row is plain, unclickable text.
+  final Future<PlannedPlanLeg?> Function(String query)? onChangeFrom;
 
   @override
   State<TripDetailsPage> createState() => _TripDetailsPageState();
@@ -163,6 +182,16 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   // survives rebuilds and is what Save/Start Navigation act on.
   late RideOption _option = widget.option;
 
+  // The leg's actual starting point - starts as whatever was passed in,
+  // but diverges once the person changes it (see _changeFrom), exactly
+  // like _option already diverges from widget.option once a leg is
+  // edited. Only ever changes when widget.isPlanLeg is true.
+  late LocationPoint _from = widget.from;
+
+  // True while a change-starting-point search/retry is in flight - see
+  // _changeFrom. Only ever reachable when widget.isPlanLeg is true.
+  bool _changingFrom = false;
+
   // What _option/_saved were right before the current Edit session
   // started - see _edit's "Revert" path, which puts these back if the
   // person declines to save whatever they changed. Only meaningful
@@ -171,7 +200,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   bool _savedBeforeEditing = false;
 
   SavedTrip get _asSavedTrip => SavedTrip(
-    from: widget.from,
+    from: _from,
     to: widget.to,
     option: _option,
     savedAt: DateTime.now(),
@@ -338,6 +367,14 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     setState(() => _changingTime = true);
     var updated = withTimeShifted(_option, delta);
     var confirmed = false;
+    // Populated only for the first leg that fails to confirm below -
+    // enough to offer a real, targeted suggestion for that one leg (see
+    // _resolveUnconfirmedTime) instead of just a flat "couldn't
+    // confirm, estimated" message. Declared out here (not inside the
+    // try block below) so they're still readable once it finishes.
+    int? failedLegIndex;
+    String? failedWantedLabel;
+    RideOption? failedAlternative;
     try {
       final legs = _option.legs;
       final realLegIndices = [
@@ -345,7 +382,13 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           if (realLegLabel(legs[i]) != null) i,
       ];
 
-      if (realLegIndices.isNotEmpty) {
+      // A walk-only trip has no scheduled vehicle to confirm against a
+      // timetable in the first place - walking works at any hour, so
+      // there's nothing to fail to confirm, and the naive shift above
+      // is already exactly right rather than a fallback guess.
+      if (realLegIndices.isEmpty) {
+        confirmed = true;
+      } else {
         final replacements = <int, RideOption>{};
         // How far this leg's OWN real confirmed timing has drifted from
         // the naive uniform shift so far - starts at the plain picked
@@ -365,11 +408,22 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           final legTo = leg.endPoint;
           if (wantedLabel == null || legFrom == null || legTo == null) {
             allConfirmed = false;
+            failedLegIndex = legIndex;
+            failedWantedLabel = wantedLabel;
             break;
           }
 
           final baseProbeAt = leg.start.add(carryDelta);
           RideOption? matched;
+          // The closest real, catchable alternative seen for this leg
+          // across every probe attempt below, regardless of whether it
+          // rides the SAME service as [wantedLabel] - kept so that if
+          // this leg's own exact service never confirms, there's still
+          // a genuine "switch to this real vehicle instead" suggestion
+          // to offer (see _resolveUnconfirmedTime), rather than only a
+          // bare "couldn't confirm" message.
+          RideOption? nearMiss;
+          Duration? nearMissGap;
           // Same "don't insist on the exact minute" reasoning the
           // original whole-trip probing used - a real bus a little
           // later than the naive guess is still a genuine,
@@ -386,17 +440,13 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
               departAt: probeAt,
             );
             for (final candidate in candidates) {
-              final labels = hopRouteLabels(candidate);
-              if (labels.length != 1 || labels.first != wantedLabel) {
-                continue;
-              }
-              // The one leg inside `candidate` that actually carries
-              // `wantedLabel` - usually the whole thing for a direct
-              // hop, but it can be sandwiched between short
+              // The one leg inside `candidate` that carries its own
+              // real service label - usually the whole thing for a
+              // direct hop, but it can be sandwiched between short
               // access/egress walk legs HERE added to reach the stop.
               TripLeg? realLeg;
               for (final candidateLeg in candidate.legs) {
-                if (realLegLabel(candidateLeg) == wantedLabel) {
+                if (realLegLabel(candidateLeg) != null) {
                   realLeg = candidateLeg;
                   break;
                 }
@@ -425,25 +475,45 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
               // minutes before the previous one even arrives) that
               // showed up after the first drift check went in. Only a
               // small grace period allows for a same-minute boarding;
-              // arriving late is fine up to a real, reasonable wait.
+              // arriving late is fine up to a real, reasonable wait -
+              // and this "must be catchable" rule applies just as much
+              // to a suggested near-miss as to an auto-confirmed match.
               if (realLeg.start.isBefore(
                 probeAt.subtract(const Duration(minutes: 1)),
               )) {
                 continue;
               }
-              if (realLeg.start.isAfter(
-                probeAt.add(const Duration(minutes: 60)),
-              )) {
-                continue;
+
+              final label = realLegLabel(realLeg);
+              final isExactService = label == wantedLabel;
+              if (isExactService &&
+                  !realLeg.start.isAfter(
+                    probeAt.add(const Duration(minutes: 60)),
+                  )) {
+                matched = candidate;
+                break;
               }
-              matched = candidate;
-              break;
+
+              // Not [wantedLabel] itself (a different real vehicle), or
+              // the same service but too far past this probe's window
+              // to auto-apply - either way, still a genuine option to
+              // SUGGEST if this leg's own service never confirms. Keeps
+              // whichever real candidate sits closest to this leg's
+              // originally intended time.
+              final gap = realLeg.start.difference(baseProbeAt).abs();
+              if (nearMissGap == null || gap < nearMissGap) {
+                nearMiss = candidate;
+                nearMissGap = gap;
+              }
             }
             if (matched != null) break;
           }
 
           if (matched == null) {
             allConfirmed = false;
+            failedLegIndex = legIndex;
+            failedWantedLabel = wantedLabel;
+            failedAlternative = nearMiss;
             break;
           }
           replacements[legIndex] = matched;
@@ -457,7 +527,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           updated = withLegsReplaced(
             _option,
             replacements: replacements,
-            from: widget.from,
+            from: _from,
             initialDelta: delta,
           );
           confirmed = true;
@@ -471,27 +541,178 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     }
     if (!mounted) return;
 
-    setState(() {
-      _option = updated;
-      // A different departure time means a different RideOption.id (see
-      // SavedTrip.id), so whatever saved status applied before no
-      // longer means anything for it - same convention as _editLeg.
-      _saved = false;
-      _legAlternatives = {};
-      _loadingLegAlternatives = true;
-      _changingTime = false;
-    });
-    _showSnack(
-      confirmed
-          ? 'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - confirmed against the real schedule.'
-          : 'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - could not confirm this route runs then, so the time is estimated.',
-      duration: const Duration(seconds: 4),
+    if (confirmed) {
+      setState(() {
+        _option = updated;
+        // A different departure time means a different RideOption.id
+        // (see SavedTrip.id), so whatever saved status applied before
+        // no longer means anything for it - same convention as
+        // _editLeg.
+        _saved = false;
+        _legAlternatives = {};
+        _loadingLegAlternatives = true;
+        _changingTime = false;
+      });
+      _showSnack(
+        'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - confirmed against the real schedule.',
+        duration: const Duration(seconds: 4),
+      );
+      await _loadLegAlternatives();
+      return;
+    }
+
+    // Couldn't confirm the exact original route runs at the new time -
+    // instead of silently guessing (the old behaviour), let the person
+    // choose a real way forward. Not "busy" anymore while they decide.
+    setState(() => _changingTime = false);
+    await _resolveUnconfirmedTime(
+      estimatedFallback: updated,
+      newDepartAt: newDepartAt,
+      delta: delta,
+      failedLegIndex: failedLegIndex,
+      failedWantedLabel: failedWantedLabel,
+      failedAlternative: failedAlternative,
     );
-    // Which legs have a real alternative worth showing as editable can
-    // itself depend on the time (a leg's own real alternatives are
-    // searched around its own start time) - re-checked for the new
-    // times, same as after any other edit (see _editLeg).
-    await _loadLegAlternatives();
+  }
+
+  /// Shown instead of a bare "could not confirm, estimated" message
+  /// whenever [_changeDepartureTime]'s per-leg re-check can't find the
+  /// exact bus/train it verified before running anywhere near the newly
+  /// picked time. Offers every real way forward that's actually
+  /// available instead of silently guessing:
+  ///
+  ///  * a genuine same-leg substitute, when the per-leg check found ANY
+  ///    other real, catchable vehicle for that exact stretch - just not
+  ///    the same one (e.g. "709 doesn't run then, but 101 does") - see
+  ///    [failedAlternative];
+  ///  * a completely fresh whole-trip search for the new date/time (see
+  ///    _regenerateForNewTime) - a different route/combination can
+  ///    exist even when this exact itinerary's specific legs don't;
+  ///  * or, only if the person explicitly picks it, the plain
+  ///    naive-shift estimate this page used to fall back to silently.
+  ///
+  /// Does nothing if the sheet is dismissed without a choice (back
+  /// gesture/outside tap) - the trip is simply left exactly as it was,
+  /// same as walking away from the date/time pickers earlier in this
+  /// same flow already does.
+  Future<void> _resolveUnconfirmedTime({
+    required RideOption estimatedFallback,
+    required DateTime newDepartAt,
+    required Duration delta,
+    int? failedLegIndex,
+    String? failedWantedLabel,
+    RideOption? failedAlternative,
+  }) async {
+    final choice = await showModalBottomSheet<_ScheduleFallbackChoice>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => _ScheduleFallbackSheet(
+        wantedLabel: failedWantedLabel,
+        alternative: failedAlternative,
+      ),
+    );
+    if (!mounted || choice == null) return;
+
+    switch (choice) {
+      case _ScheduleFallbackChoice.useAlternative:
+        if (failedLegIndex == null || failedAlternative == null) return;
+        final replaced = withLegsReplaced(
+          _option,
+          replacements: {failedLegIndex: failedAlternative},
+          from: _from,
+          initialDelta: delta,
+        );
+        setState(() {
+          _option = replaced;
+          _saved = false;
+          _legAlternatives = {};
+          _loadingLegAlternatives = true;
+        });
+        _showSnack(
+          'Switched to a real alternative - now departing '
+          '${formatFriendlyDateTime(replaced.departTime)}, confirmed '
+          'against the real schedule.',
+          duration: const Duration(seconds: 4),
+        );
+        await _loadLegAlternatives();
+        break;
+      case _ScheduleFallbackChoice.regenerate:
+        await _regenerateForNewTime(newDepartAt);
+        break;
+      case _ScheduleFallbackChoice.useEstimate:
+        setState(() {
+          _option = estimatedFallback;
+          _saved = false;
+          _legAlternatives = {};
+          _loadingLegAlternatives = true;
+        });
+        _showSnack(
+          'Updated to depart '
+          '${formatFriendlyDateTime(estimatedFallback.departTime)} - '
+          'could not confirm this route runs then, so the time is '
+          'estimated.',
+          duration: const Duration(seconds: 4),
+        );
+        await _loadLegAlternatives();
+        break;
+    }
+  }
+
+  /// Runs a completely fresh search for widget.from -> widget.to at
+  /// [newDepartAt] instead of trying to keep this saved trip's exact
+  /// legs - see _resolveUnconfirmedTime's doc comment for why this is
+  /// offered alongside (not instead of) the per-leg substitute: a
+  /// genuinely different real route/combination can exist for a new
+  /// date/time even when this specific itinerary's own legs don't.
+  /// Replaces the whole trip with the top real result, same as picking
+  /// a fresh option from the search results list. Tells the person
+  /// plainly if even a fresh search comes back with nothing real for
+  /// that date, rather than silently leaving the old (now stale)
+  /// itinerary in place.
+  Future<void> _regenerateForNewTime(DateTime newDepartAt) async {
+    setState(() => _changingTime = true);
+    try {
+      final result = await _controller.searchRides(
+        from: _from,
+        to: widget.to,
+        departAt: newDepartAt,
+      );
+      if (!mounted) return;
+      if (result.options.isEmpty) {
+        _showSnack(
+          'Could not find any real route for that date - try a '
+          'different time.',
+          isError: true,
+          duration: const Duration(seconds: 4),
+        );
+        return;
+      }
+      setState(() {
+        _option = result.options.first;
+        // A fresh search means a brand new RideOption.id - whatever
+        // saved status applied to the old itinerary no longer means
+        // anything for this one, same convention as _editLeg.
+        _saved = false;
+        _legAlternatives = {};
+        _loadingLegAlternatives = true;
+      });
+      _showSnack(
+        'Found a new real route departing '
+        '${formatFriendlyDateTime(_option.departTime)}.',
+        duration: const Duration(seconds: 4),
+      );
+      await _loadLegAlternatives();
+    } catch (error) {
+      debugPrint('[TripDetailsPage] regenerate for new time failed: $error');
+      if (!mounted) return;
+      _showSnack(
+        'Could not search for a new route right now.',
+        isError: true,
+        duration: const Duration(seconds: 4),
+      );
+    } finally {
+      if (mounted) setState(() => _changingTime = false);
+    }
   }
 
   Future<void> _toggleSave() async {
@@ -673,7 +894,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         _option,
         legIndex: legIndex,
         replacement: replacement,
-        from: widget.from,
+        from: _from,
       );
       _hasPendingEdits = true;
       // The edited option is a different SavedTrip.id (it embeds
@@ -702,7 +923,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => RouteMapPage(
-            from: widget.from,
+            from: _from,
             to: widget.to,
             option: _option,
           ),
@@ -713,12 +934,98 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => NavigationPage(
-          from: widget.from,
+          from: _from,
           to: widget.to,
           option: _option,
         ),
       ),
     );
+  }
+
+  /// Lets the person correct THIS leg's starting point right here in the
+  /// detail page (see TripDetailsPage.isPlanLeg/onChangeFrom's own doc
+  /// comments) - only reachable when widget.isPlanLeg is true, i.e. this
+  /// page was opened for one leg of a saved trip plan
+  /// (PlanTransportPage._openLeg), not a normal ad-hoc search/Saved List
+  /// trip. Delegates the actual re-geocode+retry to
+  /// widget.onChangeFrom (PlanTransportPage._searchAndRetry) - this page
+  /// only owns the dialog and how the result is shown:
+  ///
+  ///  * a route now found - _from/_option both move to the new leg, so
+  ///    the whole card (timeline, summary, arrival time) updates in
+  ///    place, exactly as if this had been the plan all along;
+  ///  * the query itself couldn't be resolved to a real place - a plain
+  ///    SnackBar, nothing else changes;
+  ///  * a real place, but still no real route from there - _from moves
+  ///    (so the From row reflects what was actually tried) but _option
+  ///    stays the last real one this page had, and the SnackBar explains
+  ///    why, same as the leg's own warning would on PlanTransportPage.
+  Future<void> _changeFrom() async {
+    final onChangeFrom = widget.onChangeFrom;
+    if (onChangeFrom == null || _changingFrom) return;
+
+    final textController = TextEditingController(text: _from.name);
+    final query = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Change starting point'),
+        content: TextField(
+          controller: textController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Search a place, e.g. Komtar, George Town',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, textController.text),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.green),
+            child: const Text('Search & Retry'),
+          ),
+        ],
+      ),
+    );
+    if (query == null || query.trim().isEmpty || !mounted) return;
+
+    setState(() => _changingFrom = true);
+    final result = await onChangeFrom(query);
+    if (!mounted) return;
+
+    if (result == null) {
+      setState(() => _changingFrom = false);
+      _showSnack(
+        'Could not find that place - try a more specific search.',
+        isError: true,
+      );
+      return;
+    }
+
+    final newOption = result.option;
+    setState(() {
+      _from = result.from;
+      if (newOption != null) _option = newOption;
+      _changingFrom = false;
+      // A different starting point means a different route, so
+      // whatever saved status applied before no longer means anything
+      // for it - same convention as _editLeg/_changeDepartureTime.
+      if (newOption != null) _saved = false;
+    });
+
+    if (newOption != null) {
+      _showSnack('Updated to depart from ${result.from.name}.');
+    } else {
+      _showSnack(
+        result.warning ??
+            'Still could not find a real route from there - try another '
+                'starting point.',
+        isError: true,
+        duration: const Duration(seconds: 4),
+      );
+    }
   }
 
   @override
@@ -728,7 +1035,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         children: [
           _DetailsBackground(destination: widget.to),
           _TripContent(
-            from: widget.from,
+            from: _from,
             to: widget.to,
             option: _option,
             editing: _editing,
@@ -738,6 +1045,9 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
             allowTimeChange: widget.allowTimeChange,
             changingTime: _changingTime,
             onChangeTime: _changeDepartureTime,
+            isPlanLeg: widget.isPlanLeg,
+            changingFrom: _changingFrom,
+            onChangeFrom: widget.onChangeFrom == null ? null : _changeFrom,
             // Was a Positioned bar permanently pinned over the timeline
             // (see _DetailsActions' old doc comment) - now just the last
             // section of the same scrollable card, after the itinerary,
@@ -834,11 +1144,15 @@ class _DestinationMap extends StatelessWidget {
 /// The trip details header image: a real photo of the destination
 /// (e.g. searching "Ayer Itam" pulls a real photo of Ayer Itam) fetched
 /// from Wikipedia by place name - see DestinationPhotoService for why
-/// Wikipedia specifically (no API key needed). Named stops/addresses
-/// with no Wikipedia article of their own fall back to _DestinationMap
-/// (a map pin at the real coordinates), which itself falls back to a
-/// fixed generic image if even that isn't available - see that class's
-/// doc comment.
+/// Wikipedia specifically (no API key needed), and for how it tries
+/// progressively broader real place names (street -> area -> city ->
+/// state -> country) before giving up, so a plain street address still
+/// gets a real photo of the real place it's in rather than falling
+/// straight to _DestinationMap. Only once every one of those candidates
+/// comes back with no photo at all does this fall back to
+/// _DestinationMap (a map pin at the real coordinates), which itself
+/// falls back to a fixed generic image if even that isn't available -
+/// see that class's doc comment.
 class _DestinationImage extends StatefulWidget {
   const _DestinationImage({required this.destination});
 
@@ -899,6 +1213,9 @@ class _TripContent extends StatelessWidget {
     this.allowTimeChange = false,
     this.changingTime = false,
     this.onChangeTime,
+    this.isPlanLeg = false,
+    this.changingFrom = false,
+    this.onChangeFrom,
     required this.saved,
     required this.checkingEditability,
     required this.canEdit,
@@ -919,6 +1236,14 @@ class _TripContent extends StatelessWidget {
   final bool allowTimeChange;
   final bool changingTime;
   final VoidCallback? onChangeTime;
+
+  /// See TripDetailsPage.isPlanLeg/onChangeFrom's own doc comments -
+  /// isPlanLeg just makes the From row below tappable, changingFrom
+  /// shows it busy while a change is in flight, and onChangeFrom (null
+  /// unless isPlanLeg is true) is what a tap actually calls.
+  final bool isPlanLeg;
+  final bool changingFrom;
+  final VoidCallback? onChangeFrom;
 
   // Passed straight through to _DetailsActions below, now that it's
   // rendered as the last section of this same scrollable card instead
@@ -1008,7 +1333,35 @@ class _TripContent extends StatelessWidget {
                   ),
                 ),
               ),
-              LocationRow(label: 'From', value: from.name, color: AppColors.green),
+              InkWell(
+                onTap: (isPlanLeg && !changingFrom) ? onChangeFrom : null,
+                borderRadius: BorderRadius.circular(6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: LocationRow(
+                        label: 'From',
+                        value: from.name,
+                        color: AppColors.green,
+                      ),
+                    ),
+                    if (isPlanLeg) ...[
+                      const SizedBox(width: 6),
+                      changingFrom
+                          ? const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(
+                              Icons.edit_outlined,
+                              size: 13,
+                              color: AppColors.green,
+                            ),
+                    ],
+                  ],
+                ),
+              ),
               const Divider(height: 18),
               LocationRow(
                 label: 'To',
@@ -1354,6 +1707,145 @@ class _LegAlternativesSheet extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// What the person picked in [_ScheduleFallbackSheet] - see
+/// TripDetailsPage._resolveUnconfirmedTime, the only place that reads
+/// this.
+enum _ScheduleFallbackChoice { useAlternative, regenerate, useEstimate }
+
+/// Shown by TripDetailsPage._resolveUnconfirmedTime when the per-leg
+/// schedule re-check in _changeDepartureTime couldn't confirm the
+/// original route runs anywhere near a newly picked date/time - offers
+/// every real way forward instead of silently falling back to an
+/// unverified guess. [alternative] (a real, catchable RideOption for
+/// the one leg that failed to confirm, found while probing - see
+/// _changeDepartureTime's `nearMiss`) is only shown as an option when
+/// one was actually found; the fresh-search and use-estimate choices
+/// are always offered. Pops with the picked [_ScheduleFallbackChoice],
+/// or with nothing (back gesture/outside tap) to mean "leave the trip
+/// exactly as it was".
+class _ScheduleFallbackSheet extends StatelessWidget {
+  const _ScheduleFallbackSheet({this.wantedLabel, this.alternative});
+
+  final String? wantedLabel;
+  final RideOption? alternative;
+
+  @override
+  Widget build(BuildContext context) {
+    final alt = alternative;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              wantedLabel == null
+                  ? "Couldn't confirm this trip's schedule for that time"
+                  : "$wantedLabel doesn't seem to run around that time",
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              "Here's what's actually available:",
+              style: TextStyle(fontSize: 12, color: AppColors.muted),
+            ),
+            const SizedBox(height: 14),
+            if (alt != null) ...[
+              _FallbackOptionTile(
+                icon: Icons.swap_horiz,
+                title: 'Switch to ${_alternativeSummary(alt)}',
+                subtitle:
+                    'Real departure ${formatClockTime(alt.departTime)} - '
+                    'confirmed against the real schedule',
+                onTap: () => Navigator.of(
+                  context,
+                ).pop(_ScheduleFallbackChoice.useAlternative),
+              ),
+              const SizedBox(height: 10),
+            ],
+            _FallbackOptionTile(
+              icon: Icons.travel_explore,
+              title: 'Search a fresh route for this date',
+              subtitle: 'May come back with a different real combination',
+              onTap: () => Navigator.of(
+                context,
+              ).pop(_ScheduleFallbackChoice.regenerate),
+            ),
+            const SizedBox(height: 10),
+            _FallbackOptionTile(
+              icon: Icons.schedule_outlined,
+              title: 'Use the estimated time anyway',
+              subtitle: 'Not confirmed against a real schedule',
+              onTap: () => Navigator.of(
+                context,
+              ).pop(_ScheduleFallbackChoice.useEstimate),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FallbackOptionTile extends StatelessWidget {
+  const _FallbackOptionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppColors.chip,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Icon(icon, size: 20, color: AppColors.green),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
+            ],
+          ),
         ),
       ),
     );

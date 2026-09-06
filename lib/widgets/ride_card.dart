@@ -13,11 +13,25 @@ class RideCard extends StatelessWidget {
     required this.option,
     required this.onTap,
     this.featured = false,
+    this.showElapsedFromSearch = true,
   });
 
   final RideOption option;
   final VoidCallback onTap;
   final bool featured;
+
+  /// Hides the "elapsed since search" duration and "Waits ..." warning
+  /// below the arrival time (see _ArrivalInformation) - both exist to
+  /// make a NEAR-TERM search fair to compare (does this option make you
+  /// wait hours before it even starts?), which stops making sense once
+  /// the "search" wasn't just now but a real search made for a specific
+  /// future day as part of a whole-trip plan (see
+  /// TransportController.planTransportationForPlan / PlanTransportPage,
+  /// the only caller that sets this false) - there [option.searchDepartAt]
+  /// is a future planning time, not "now", so "elapsed from search" would
+  /// just be a confusing, sometimes hugely negative, number instead of a
+  /// useful comparison.
+  final bool showElapsedFromSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +68,10 @@ class RideCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(child: _RideInformation(option: option)),
-              _ArrivalInformation(option: option),
+              _ArrivalInformation(
+                option: option,
+                showElapsedFromSearch: showElapsedFromSearch,
+              ),
               const SizedBox(width: 5),
               const Icon(
                 Icons.chevron_right_rounded,
@@ -101,7 +118,10 @@ class _RideInformation extends StatelessWidget {
             if (option.delayEstimate != null)
               MiniChip(option.delayEstimate!.chipLabel, warning: true),
             for (final tag in shownTags)
-              MiniChip(tag, warning: tag == kRainBikeTag),
+              MiniChip(
+                tag,
+                warning: tag == kRainBikeTag || tag == kWalkOnlyLongTag,
+              ),
           ],
         ),
         const SizedBox(height: 6),
@@ -126,9 +146,13 @@ class _RideInformation extends StatelessWidget {
 }
 
 class _ArrivalInformation extends StatelessWidget {
-  const _ArrivalInformation({required this.option});
+  const _ArrivalInformation({
+    required this.option,
+    this.showElapsedFromSearch = true,
+  });
 
   final RideOption option;
+  final bool showElapsedFromSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -170,23 +194,28 @@ class _ArrivalInformation extends StatelessWidget {
         // look deceptively as fast as something you could start on right
         // now. This is the fair, comparable-across-options number - see
         // RideOption.searchDepartAt's doc comment.
-        Text(
-          formatDuration(option.totalElapsedFromSearch),
-          style: const TextStyle(fontSize: 7.5),
-        ),
-        // Only shown when it's actually worth calling out - a couple of
-        // minutes' rounding is normal and not worth a warning line, but a
-        // real multi-hour gap before a scheduled service even starts
-        // running needs to be visible, not hidden inside a duration number
-        // that reads as "fast" at a glance.
-        if (option.waitBeforeDeparture > const Duration(minutes: 15))
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              'Waits ${formatDuration(option.waitBeforeDeparture)}',
-              style: const TextStyle(fontSize: 6.5, color: AppColors.orange),
-            ),
+        if (showElapsedFromSearch) ...[
+          Text(
+            formatDuration(option.totalElapsedFromSearch),
+            style: const TextStyle(fontSize: 7.5),
           ),
+          // Only shown when it's actually worth calling out - a couple
+          // of minutes' rounding is normal and not worth a warning
+          // line, but a real multi-hour gap before a scheduled service
+          // even starts running needs to be visible, not hidden inside
+          // a duration number that reads as "fast" at a glance.
+          if (option.waitBeforeDeparture > const Duration(minutes: 15))
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Waits ${formatDuration(option.waitBeforeDeparture)}',
+                style: const TextStyle(
+                  fontSize: 6.5,
+                  color: AppColors.orange,
+                ),
+              ),
+            ),
+        ],
       ],
     );
   }

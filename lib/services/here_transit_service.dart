@@ -118,7 +118,7 @@ class HereTransitService implements TransportRepository {
       queryParameters: {
         'origin': from.coordinateString,
         'destination': to.coordinateString,
-        'time': departAt.toUtc().toIso8601String(),
+        'time': malaysiaWallClockToInstant(departAt).toIso8601String(),
         // 'polyline' gets each section's real road/rail geometry, so the
         // navigation map can follow the actual route instead of drawing a
         // straight line between the origin and destination.
@@ -205,7 +205,7 @@ class HereTransitService implements TransportRepository {
         queryParameters: {
           'origin': from.coordinateString,
           'destination': to.coordinateString,
-          'time': departAt.toUtc().toIso8601String(),
+          'time': malaysiaWallClockToInstant(departAt).toIso8601String(),
           // 'actions'/'intermediate' give richer per-section detail
           // (turn-by-turn, interchange points) this app doesn't parse
           // yet, but asking for them costs nothing and keeps this call
@@ -381,7 +381,7 @@ class HereTransitService implements TransportRepository {
           'transportMode': 'car',
           'origin': from.coordinateString,
           'destination': to.coordinateString,
-          'departureTime': departAt.toUtc().toIso8601String(),
+          'departureTime': malaysiaWallClockToInstant(departAt).toIso8601String(),
           'return': 'travelSummary,polyline',
           'apiKey': ApiConfig.hereApiKey,
         },
@@ -604,10 +604,18 @@ class HereTransitService implements TransportRepository {
     );
   }
 
+  /// Every real leg time HERE returns is a genuine absolute instant
+  /// (its ISO string carries its own UTC offset) - [instantToMalaysiaWallClock]
+  /// re-expresses that instant using Malaysia's own wall-clock numbers
+  /// (rather than `.toLocal()`'s device-timezone numbers - see that
+  /// function's own doc comment, and [malaysiaWallClockToInstant]'s for
+  /// why the OUTGOING request needs the matching fix) so every
+  /// departure/arrival this module works with afterwards means the
+  /// same thing as the `deadline`/`visitStart` it gets compared against.
   DateTime? _parseTime(String? iso) {
     if (iso == null) return null;
     try {
-      return DateTime.parse(iso).toLocal();
+      return instantToMalaysiaWallClock(DateTime.parse(iso));
     } catch (_) {
       return null;
     }

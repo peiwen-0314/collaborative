@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../controllers/transport_controller.dart';
 import '../core/api_config.dart';
+import '../data/transport_data.dart';
 import '../core/app_assets.dart';
 import '../core/app_theme.dart';
 import '../core/formatters.dart';
@@ -14,6 +15,7 @@ import '../widgets/journey_card.dart';
 import '../widgets/ride_card.dart';
 import 'saved_list_page.dart';
 import 'trip_details_page.dart';
+import 'trip_plans_page.dart';
 import 'ai_trip_planner_page.dart';
 import 'home_page.dart';
 
@@ -47,16 +49,69 @@ class _TransportationPageState extends State<TransportationPage> {
 
   bool _loading = false;
   String? _error;
+
+  /// True once a detected "From" has landed outside both of
+  /// isInMalaysia's bounding boxes - this app only has real transit
+  /// data for Malaysia's own operators, so there's nothing real to
+  /// search for from anywhere else. Gates `build` straight to the Saved
+  /// List (see `_hasUsableStatus`/`hasDestination` below, both left
+  /// false on purpose whenever this is true - see
+  /// `_detectFromLocation`) instead of running a real search or
+  /// recommendation lookup that could only ever come back empty.
+  bool _outsideMalaysia = false;
+
+  /// True once the "only available in Malaysia" notice has been shown
+  /// for this page instance - shown at most once (see
+  /// `_showOutsideMalaysiaNoticeOnce`) rather than every single time
+  /// `_detectFromLocation` re-runs (a manual "Detect My Location" retry,
+  /// a swap, ...) and lands outside Malaysia again.
+  bool _shownOutsideMalaysiaNotice = false;
   List<RideOption> _rideOptions = const [];
 
   List<SavedTrip> _savedPreview = const [];
 
-  // Null until a real recommendation has loaded (or none could be found) -
-  // see _loadRecommendation/RecommendedPanel below. Also reachable after a
-  // search via the header shortcut (see _showRecommendedSheet), since the
-  // panel itself is normally replaced by the results list once a
-  // destination is picked.
-  RecommendedRide? _recommended;
+  /// Every saved trip, as last fetched (already newest-saved-first - see
+  /// SavedTripsStore.getAll) - kept around so [_recomputeSavedPreview]
+  /// can re-rank [_savedPreview] whenever `_from` changes without a
+  /// fresh Firestore read each time.
+  List<SavedTrip> _allSavedTrips = const [];
+
+  // Null until today's transport status has loaded (or none could be
+  // found, e.g. no saved trip plan is running today) - see
+  // _loadRecommendation/RecommendedPanel below. This inline panel is
+  // separate from the header's "My Trip Plans" shortcut (_openTripPlans)
+  // - that one lists every upcoming plan, not just today's single pick,
+  // and stays visible even when this is null. Either wraps a
+  // [RecommendedRide] (nothing planned yet - the original
+  // "recommendation" behaviour) or a [PlannedPlanLeg] (the person
+  // already planned and saved today's ride - see
+  // TransportController.todaysTransportStatus's doc comment).
+  TodaysTransportStatus? _status;
+
+  /// True until we know for sure whether there is (or isn't) something
+  /// to put in [_status] - i.e. until [_loadRecommendation] actually
+  /// finishes, or we've hit a state where it will never even be called
+  /// (no [_from] yet, location permission denied/disabled, or
+  /// [_outsideMalaysia]). `build` uses this to hold off on the Saved
+  /// List while this is still true, instead of showing it and then
+  /// immediately replacing it with a "Recommended For You"/"Today's
+  /// Plan" panel the moment the real answer comes back - which used to
+  /// read as the page changing its mind right in front of the person.
+  bool _recommendationLoading = true;
+
+  /// Whether [_status] actually has something displayable - the
+  /// "already planned" branch can carry a leg whose [to]/[option] came
+  /// back null (its own transportation couldn't be planned - see
+  /// PlannedPlanLeg's doc comment), which has nothing to show here.
+  bool get _hasUsableStatus {
+    final status = _status;
+    if (status == null) return false;
+    if (status.isAlreadyPlanned) {
+      final leg = status.plannedLeg;
+      return leg != null && leg.to != null && leg.option != null;
+    }
+    return status.suggestion != null;
+  }
 
   @override
   void initState() {
@@ -76,9 +131,30 @@ class _TransportationPageState extends State<TransportationPage> {
     if (!mounted || !_fromIsAutoDetected) return;
 
     if (result.status == LocationLookupStatus.success && result.point != null) {
-      setState(() => _from = result.point);
+      final point = result.point!;
+      setState(() => _from = point);
+
+      if (!isInMalaysia(point)) {
+        setState(() {
+          _outsideMalaysia = true;
+          _recommendationLoading = false;
+        });
+        _showOutsideMalaysiaNoticeOnce();
+        // Not _search()/_loadRecommendation() - there's no real transit
+        // data for outside Malaysia to search anyway, so `build` just
+        // falls through to the Saved List instead (see
+        // `_outsideMalaysia`'s own doc comment).
+        _recomputeSavedPreview();
+        return;
+      }
+
+      setState(() {
+        _outsideMalaysia = false;
+        _recommendationLoading = true;
+      });
       _search();
       _loadRecommendation();
+      _recomputeSavedPreview();
       return;
     }
 
@@ -86,16 +162,54 @@ class _TransportationPageState extends State<TransportationPage> {
         result.status == LocationLookupStatus.serviceDisabled) {
       // Respect the user's choice - don't guess a starting point for them,
       // just leave "From" (and "To", already blank) empty so they can pick
-      // manually.
-      setState(() => _fromPlaceholder = 'Tap to select your location');
+      // manually. No `_from` means `_loadRecommendation` will never run,
+      // so there's nothing left to wait for either.
+      setState(() {
+        _fromPlaceholder = 'Tap to select your location';
+        _recommendationLoading = false;
+      });
       _showLocationFallbackNotice(result.status);
       return;
     }
 
     // Never invent a fixed origin. A failed GPS lookup leaves the field
     // empty so the user can retry or choose a real searched place.
-    setState(() => _fromPlaceholder = 'Tap to select your location');
+    setState(() {
+      _fromPlaceholder = 'Tap to select your location';
+      _recommendationLoading = false;
+    });
     _showLocationFallbackNotice(result.status);
+  }
+
+  /// See `_outsideMalaysia`'s own doc comment - shown at most once per
+  /// page instance, same "don't spam it every retry" reasoning as
+  /// `_shownOutsideMalaysiaNotice`.
+  void _showOutsideMalaysiaNoticeOnce() {
+    if (_shownOutsideMalaysiaNotice || !mounted) return;
+    _shownOutsideMalaysiaNotice = true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'This transportation feature is only available for locations '
+          'in Malaysia.',
+        ),
+        duration: Duration(seconds: 4),
+      ),
+    );
+  }
+
+  /// Lets the person explicitly ask for their location again - the only
+  /// way back to a real auto-detected "From" once detection has failed
+  /// (permission denied, GPS off, a failed lookup) or landed outside
+  /// Malaysia, short of typing a place by hand every time. Forces
+  /// `_fromIsAutoDetected` back on first, since `_detectFromLocation`
+  /// itself is a no-op once that's false (e.g. after a manual "From"
+  /// pick) - so this doubles as "go back to auto-detecting", not only
+  /// "try again after a failure".
+  void _retryDetectLocation() {
+    _fromIsAutoDetected = true;
+    setState(() => _fromPlaceholder = 'Detecting your location…');
+    _detectFromLocation();
   }
 
   void _showLocationFallbackNotice(LocationLookupStatus status) {
@@ -156,85 +270,163 @@ class _TransportationPageState extends State<TransportationPage> {
   Future<void> _loadSavedPreview() async {
     final all = await _controller.getSavedTrips();
     if (!mounted) return;
-    setState(() => _savedPreview = all.take(3).toList());
+    _allSavedTrips = all;
+    _recomputeSavedPreview();
   }
 
-  /// Best-effort only - see TransportController.recommendedRideTo's doc
-  /// comment. A null result (or an exception) just means _recommended
-  /// stays/becomes null, which hides both the inline panel and the
-  /// header shortcut - never shown as an error to the person, since
-  /// there was never a "recommendation" action they took that failed.
+  /// How close a saved trip's own starting point has to be to `_from`
+  /// to count as "matches where the person is right now", rather than
+  /// just happening to be the nearest of a bunch of far-away trips -
+  /// same bucket ai_trip_planner_controller.dart already treats as
+  /// genuinely nearby.
+  static const double _nearbyMatchKm = 5.0;
+
+  /// Picks at most 3 of [_allSavedTrips] to preview here on the home
+  /// page - see this class's own doc comment on `_savedPreview` for why
+  /// this is a small, different-purpose preview from the full Saved
+  /// List page. Prefers trips that actually start near `_from` (nearest
+  /// first, within [_nearbyMatchKm]) since a bookmark for a journey the
+  /// person isn't near right now isn't a useful shortcut; only once
+  /// there's genuinely no nearby match (or `_from` itself isn't known
+  /// yet) does this fall back to the plain 3 most recently saved -
+  /// [_allSavedTrips] is already sorted that way.
+  void _recomputeSavedPreview() {
+    final from = _from;
+    List<SavedTrip> picked;
+    if (from == null || _allSavedTrips.isEmpty) {
+      picked = _allSavedTrips.take(3).toList();
+    } else {
+      final nearby = _allSavedTrips
+          .where((trip) => from.distanceKm(trip.from) <= _nearbyMatchKm)
+          .toList()
+        ..sort(
+          (a, b) =>
+              from.distanceKm(a.from).compareTo(from.distanceKm(b.from)),
+        );
+      picked = nearby.isNotEmpty
+          ? nearby.take(3).toList()
+          : _allSavedTrips.take(3).toList();
+    }
+    if (!mounted) return;
+    setState(() => _savedPreview = picked);
+  }
+
+  /// Best-effort only - see TransportController.todaysTransportStatus's
+  /// doc comment. A null result (or an exception) just means _status
+  /// stays/becomes null, which hides the inline panel - never shown as
+  /// an error to the person, since there was never a "recommendation"
+  /// action they took that failed.
   Future<void> _loadRecommendation() async {
     final from = _from;
-    if (from == null) return;
+    if (from == null) {
+      if (mounted) setState(() => _recommendationLoading = false);
+      return;
+    }
     try {
-      final recommended = await _controller.recommendedRideTo(from);
+      final status = await _controller.todaysTransportStatus(from);
       if (!mounted) return;
-      setState(() => _recommended = recommended);
+      setState(() {
+        _status = status;
+        _recommendationLoading = false;
+      });
     } catch (error) {
       debugPrint('[TransportationPage] recommendation load failed: $error');
+      if (!mounted) return;
+      setState(() => _recommendationLoading = false);
     }
   }
 
-  /// Fills "To" with the recommended destination and runs a fresh search
-  /// to it - same as tapping any real place suggestion, whether this was
-  /// reached from the inline panel (before a search) or the header
-  /// shortcut's bottom sheet (after one) - see _showRecommendedSheet.
+  /// Opens the real detail page for today's recommended ride directly -
+  /// [recommended.option] is already the best real route
+  /// TransportController.todaysTransportStatus found for it, so tapping
+  /// this shows that route's own detail page straight away, same as
+  /// [_openPlannedRide] does for an already-planned leg, instead of
+  /// filling "To" and re-running a fresh search that would hand back a
+  /// whole list of alternatives to choose between again - the
+  /// recommendation IS the pick. Only ever reached when nothing's been
+  /// planned for today yet (see TodaysTransportStatus.suggestion) - the
+  /// header shortcut opens a full page (see _openTripPlans) instead of a
+  /// preview card, so it doesn't call this.
   void _selectRecommended(RecommendedRide recommended) {
-    setState(() => _to = recommended.to);
-    _search();
-  }
-
-  /// Re-opens the "Recommended For You" panel after a search, since it's
-  /// normally hidden once a destination is picked (replaced by the
-  /// results list) and there's no "back" step that brings it back on its
-  /// own - see the header's lightbulb button in build().
-  void _showRecommendedSheet() {
-    final recommended = _recommended;
-    if (recommended == null) return;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) => Padding(
-        padding: EdgeInsets.fromLTRB(
-          16,
-          16,
-          16,
-          MediaQuery.of(sheetContext).viewInsets.bottom + 16,
-        ),
-        child: SafeArea(
-          top: false,
-          child: RecommendedPanel(
-            option: recommended.option,
-            onTap: () {
-              Navigator.of(sheetContext).pop();
-              _selectRecommended(recommended);
-            },
-          ),
+    final from = _from;
+    if (from == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TripDetailsPage(
+          from: from,
+          to: recommended.to,
+          option: recommended.option,
         ),
       ),
     );
   }
 
+  /// Opens the real ride the person already planned and saved for today
+  /// (TodaysTransportStatus.alreadyPlanned) - shows the exact real route
+  /// that was already saved via PlanTransportPage, same direct-to-detail
+  /// shape [_selectRecommended] now uses for a plain suggestion too.
+  void _openPlannedRide(PlannedPlanLeg leg) {
+    final to = leg.to;
+    final option = leg.option;
+    if (to == null || option == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TripDetailsPage(
+          from: leg.from,
+          to: to,
+          option: option,
+          allowTimeChange: true,
+        ),
+      ),
+    );
+  }
+
+  /// Opens the full "My Trip Plans" list (TripPlansPage) - every
+  /// upcoming/ongoing saved trip plan, not just today's single pick.
+  /// Replaces the old lightbulb bottom-sheet shortcut (which only ever
+  /// showed one "today" recommendation and had nowhere to go from
+  /// there) with a real page, styled like SavedListPage, that a person
+  /// can browse - and from a plan there, plan transportation for the
+  /// whole trip (see PlanTransportPage), not just one destination.
+  void _openTripPlans() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const TripPlansPage()));
+  }
+
+  /// Swaps whatever is in "From" and "To" - previously a no-op unless
+  /// BOTH were already filled in, which made the swap icon look
+  /// perfectly tappable while actually doing nothing the moment either
+  /// field was still empty (e.g. right after auto-detecting "From" but
+  /// before typing a destination - exactly the common case). Only truly
+  /// nothing to swap when NEITHER field has a value yet; every other
+  /// combination is a real swap, including one side ending up null -
+  /// _search/_loadRecommendation/_recomputeSavedPreview all already
+  /// handle a null "From" or "To" on their own (they just don't run the
+  /// part that needs it), so nothing extra needs guarding here.
   void _swap() {
-    if (_from == null || _to == null) return;
+    if (_from == null && _to == null) return;
     setState(() {
-      final temp = _from!;
+      final temp = _from;
       _from = _to;
       _to = temp;
       _fromIsAutoDetected = false;
+      _recommendationLoading = true;
     });
     _search();
     _loadRecommendation();
+    _recomputeSavedPreview();
   }
 
   void _handleFromSelected(LocationPoint point) {
     setState(() {
       _from = point;
       _fromIsAutoDetected = false;
+      _recommendationLoading = true;
     });
     _search();
     _loadRecommendation();
+    _recomputeSavedPreview();
   }
 
   void _handleToSelected(LocationPoint point) {
@@ -334,6 +526,17 @@ class _TransportationPageState extends State<TransportationPage> {
     final hasDestination = _to != null;
 
     return Scaffold(
+      // Color(0xFFF8FAF8) - the exact same value HomePage.pageBackground
+      // uses (lib/views/home_page.dart) for its own Scaffold, at the
+      // person's own request to match it here. This page had no
+      // backgroundColor override at all before, so it was falling back
+      // to the app theme's plain Colors.white (see buildAppTheme's
+      // scaffoldBackgroundColor) - close to HomePage's near-white tint
+      // but not quite it, hence the visible mismatch between the two
+      // tabs. Hardcoded here (matching HomePage's own approach) rather
+      // than pulled from a shared constant, since HomePage isn't part
+      // of this module.
+      backgroundColor: const Color(0xFFF8FAF8),
       body: SafeArea(
         bottom: false,
         child: RefreshIndicator(
@@ -349,24 +552,27 @@ class _TransportationPageState extends State<TransportationPage> {
                   children: [
                     Row(
                       children: [
-                        Image.asset(AppAssets.logo, width: 148, height: 42),
+                        Image.asset(
+                          AppAssets.logo,
+                          height: 55,
+                          fit: BoxFit.contain,
+                        ),
                         const Spacer(),
-                        // Only appears once a real recommendation has
-                        // loaded (see _loadRecommendation) - lets a
-                        // person reopen "Recommended For You" after
-                        // they've already picked a destination, since
-                        // the inline panel below is replaced by the
-                        // results list at that point and there's no
-                        // "back" step that brings it back on its own.
-                        if (_recommended != null)
-                          IconButton(
-                            onPressed: _showRecommendedSheet,
-                            tooltip: 'Recommended for you',
-                            icon: const Icon(
-                              Icons.lightbulb_outline,
-                              color: AppColors.green,
-                            ),
+                        // Always visible - unlike the old lightbulb
+                        // shortcut, this doesn't depend on today
+                        // specifically having a recommendation (see
+                        // _openTripPlans/TripPlansPage, which shows its
+                        // own empty state when there's nothing upcoming
+                        // yet, the same way the bookmark icon below
+                        // does for an empty Saved List).
+                        IconButton(
+                          onPressed: _openTripPlans,
+                          tooltip: 'My Trip Plans',
+                          icon: const Icon(
+                            Icons.event_note_outlined,
+                            color: AppColors.green,
                           ),
+                        ),
                         IconButton(
                           onPressed: _openSavedList,
                           tooltip: 'Saved trips',
@@ -380,7 +586,9 @@ class _TransportationPageState extends State<TransportationPage> {
                     const SizedBox(height: 6),
                     Text(
                       'Choose Your Ride',
-                      style: Theme.of(context).textTheme.headlineSmall,
+                      style: Theme.of(
+                        context,
+                     ).textTheme.headlineSmall?.copyWith(fontSize: 19),
                     ),
                     const SizedBox(height: 14),
                     JourneyCard(
@@ -391,22 +599,121 @@ class _TransportationPageState extends State<TransportationPage> {
                       onToSelected: _handleToSelected,
                       onSwap: _swap,
                     ),
+                    // No real "From" yet - either detection hasn't
+                    // resolved anything (denied/disabled/failed - see
+                    // _showLocationFallbackNotice) or the person picked
+                    // it away manually and wants auto-detection back.
+                    // Typing a place by hand still works via the field
+                    // itself, but this is the explicit "try detecting
+                    // again" the person can reach for either way.
+                    if (_from == null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton.icon(
+                          onPressed: _retryDetectLocation,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.green,
+                            side: const BorderSide(color: AppColors.green),
+                            minimumSize: const Size(0, 32),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                            ),
+                          ),
+                          icon: const Icon(Icons.my_location, size: 15),
+                          label: const Text(
+                            'Detect My Location',
+                            style: TextStyle(fontSize: 11.5),
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 9),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: DateChip(dateTime: _departAt, onTap: _pickDate),
                     ),
                     const SizedBox(height: 14),
-                    if (hasDestination)
+                    // Shown regardless of hasDestination - unlike before,
+                    // this doesn't disappear the moment a destination is
+                    // typed (that used to need the old lightbulb
+                    // bottom-sheet shortcut, which read as an ugly extra
+                    // drawer - see _openTripPlans' doc comment for what
+                    // that button became instead). Pre-search it's the
+                    // full featured panel; once results replace the rest
+                    // of this section, it shrinks to a compact pinned
+                    // card so it never gets confused for one of the
+                    // actual search results below it.
+                    // Never shown while `_outsideMalaysia` is true (see its
+                    // own doc comment) - `_status`/`_to` should already
+                    // be null/unset in that state (_detectFromLocation
+                    // skips loading either), but this is the explicit,
+                    // can't-drift-out-of-sync guard rather than relying
+                    // on that alone.
+                    // Only shown pre-search (hasDestination false) - at
+                    // the person's own request, this no longer shrinks
+                    // to a pinned card once a destination is typed and
+                    // real search results take over below (see
+                    // _buildResultsSection): a "Today's Trip Plan"
+                    // shortcut sitting above results for a different,
+                    // just-searched route read as confusing, not
+                    // helpful, so it's hidden outright instead.
+                    if (!_outsideMalaysia &&
+                        _hasUsableStatus &&
+                        !hasDestination) ...[
+                      _status!.isAlreadyPlanned
+                          ? RecommendedPanel(
+                              to: _status!.plannedLeg!.to!,
+                              option: _status!.plannedLeg!.option!,
+                              alreadyPlanned: true,
+                              onTap: () =>
+                                  _openPlannedRide(_status!.plannedLeg!),
+                            )
+                          : RecommendedPanel(
+                              to: _status!.suggestion!.to,
+                              option: _status!.suggestion!.option,
+                              onTap: () =>
+                                  _selectRecommended(_status!.suggestion!),
+                            ),
+                      const SizedBox(height: 14),
+                    ],
+                    if (!_outsideMalaysia && hasDestination)
                       ..._buildResultsSection()
-                    else ...[
-                      if (_recommended != null) ...[
-                        RecommendedPanel(
-                          option: _recommended!.option,
-                          onTap: () => _selectRecommended(_recommended!),
+                    // `_outsideMalaysia` means there's genuinely nothing
+                    // real this module can search for at all right now -
+                    // no recommendation load is coming, so go straight
+                    // to the Saved List.
+                    else if (_outsideMalaysia) ...[
+                      SectionHeading(
+                        title: 'Saved List',
+                        onTap: _openSavedList,
+                      ),
+                      const SizedBox(height: 8),
+                      ..._buildSavedPreviewSection(),
+                    ]
+                    // Still checking for a "Recommended For You"/"Today's
+                    // Plan" panel - hold off on the Saved List rather
+                    // than showing it and then immediately swapping it
+                    // out the moment the real answer arrives, which read
+                    // as the page changing its mind mid-view.
+                    else if (_recommendationLoading) ...[
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            color: AppColors.green,
+                          ),
                         ),
-                        const SizedBox(height: 14),
-                      ],
+                      ),
+                    ]
+                    // Saved List fills this space whenever there's
+                    // nothing more relevant to show above it - a real
+                    // "Recommended For You" suggestion/already-planned
+                    // ride for today is worth more of the person's
+                    // attention right now than a generic saved-trip
+                    // shortcut (see _hasUsableStatus), but now that we
+                    // know for sure there isn't one.
+                    else if (!_hasUsableStatus) ...[
                       SectionHeading(
                         title: 'Saved List',
                         onTap: _openSavedList,
@@ -537,25 +844,49 @@ class _TransportationPageState extends State<TransportationPage> {
 }
 
 /// The "Recommended For You" panel, shown only while no destination has
-/// been picked yet (alongside the Saved List) - matches the original
-/// design (a featured ride card in a pale-green panel), not a bare list.
-/// Tapping it fills in "To" with the suggested destination and runs the
-/// search immediately.
+/// been picked yet (alongside the Saved List) - a featured ride card in
+/// a pale-green panel. Once a destination IS picked and real search
+/// results take over below, RideHomePage hides this panel entirely (see
+/// its own build method's `!hasDestination` guard) rather than
+/// shrinking it to a pinned card - a "Today's Trip Plan" shortcut
+/// sitting above results for a different, just-searched route read as
+/// confusing rather than helpful.
+/// Tapping opens that ride's own detail page directly (see
+/// RideHomePage._selectRecommended/_openPlannedRide) - never a fresh
+/// search into a list of alternatives, since [option] already IS the
+/// one real route being recommended (or, when [alreadyPlanned] is set,
+/// the one already saved for today).
 ///
-/// [option] is generated by [TransportController.recommendedRideTo] using
-/// the same offline generator the rest of the app falls back to - a
-/// placeholder until the travel-plan module a teammate is building can
-/// supply a real pick.
+/// [option] comes from [TransportController.todaysTransportStatus],
+/// which is based purely on the signed-in user's own active saved trip
+/// plan (the AI Trip Planner module's `saved_trip_plans` - see that
+/// method's doc comment) - no invented/offline placeholder anymore.
+/// Not shown at all (see RideHomePage's `_hasUsableStatus` check)
+/// whenever there's no such plan actually running today.
 class RecommendedPanel extends StatelessWidget {
   const RecommendedPanel({
     super.key,
+    required this.to,
     required this.option,
     required this.onTap,
+    this.alreadyPlanned = false,
   });
 
+  /// The recommended destination itself - shown above [option] so the
+  /// panel actually says where it's suggesting a ride TO, not just what
+  /// the ride looks like (see this class's own name label right above
+  /// it for what kind of recommendation it is).
+  final LocationPoint to;
   final RideOption option;
   final VoidCallback onTap;
 
+  /// True when [option] is the ride the person ALREADY planned and
+  /// saved for today (TodaysTransportStatus.alreadyPlanned), not a
+  /// suggestion to go plan one - swaps the label and hides the
+  /// "elapsed since search" line (meaningless once transportation was
+  /// already fixed days ago - see RideCard.showElapsedFromSearch's doc
+  /// comment).
+  final bool alreadyPlanned;
 
   @override
   Widget build(BuildContext context) {
@@ -568,12 +899,41 @@ class RecommendedPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Recommended For you',
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+          Text(
+            alreadyPlanned
+                ? "Today's Ride Is Planned"
+                : 'Recommended For you',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              const Icon(
+                Icons.place_outlined,
+                size: 13,
+                color: AppColors.green,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  shortPlaceName(to.name),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
-          RideCard(option: option, onTap: onTap, featured: true),
+          RideCard(
+            option: option,
+            onTap: onTap,
+            featured: true,
+            showElapsedFromSearch: !alreadyPlanned,
+          ),
         ],
       ),
     );

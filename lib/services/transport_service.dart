@@ -65,7 +65,7 @@ class RouteSearchResult {
 ///     a fabricated route/time looked and got reported as real, which is
 ///     worse than an honest "no routes found" empty state. That
 ///     generator is still used elsewhere in the transportation module
-///     (see [TransportController.recommendedRideTo]'s doc comment) where
+///     (see [TransportController.todaysTransportStatus]'s doc comment) where
 ///     there's no real alternative to fall back to at all yet - just not
 ///     as a silent substitute for a real search here.
 class TransportService {
@@ -165,11 +165,14 @@ class TransportService {
 
         final result = RouteSearchResult(
           options: _dedupeByMode([
-            ...transitOptions,
-            ...intermodalOptions,
-            ...osmBikeOptions,
-            ?driveOption,
-          ]),
+                ...transitOptions,
+                ...intermodalOptions,
+                ...osmBikeOptions,
+                ?driveOption,
+              ])
+              .where((option) => !_hasExcessiveWalk(option))
+              .map(_tagIfWalkOnlyLong)
+              .toList(),
           isLive: true,
         );
         await _writeCache(cacheKey, result);
@@ -203,12 +206,16 @@ class TransportService {
       // Ignore - bike-share is a bonus, not a requirement.
     }
 
+    final filteredOsmBikeOptions = _dedupeByMode(osmBikeOptions)
+        .where((option) => !_hasExcessiveWalk(option))
+        .map(_tagIfWalkOnlyLong)
+        .toList();
     final result = RouteSearchResult(
-      options: _dedupeByMode(osmBikeOptions),
+      options: filteredOsmBikeOptions,
       // True only if OsmBikeShareService actually found something real -
       // an empty list here means no real data at all was available for
       // this trip, not "showing something else instead".
-      isLive: osmBikeOptions.isNotEmpty,
+      isLive: filteredOsmBikeOptions.isNotEmpty,
     );
     await _writeCache(cacheKey, result);
     return result;
@@ -475,6 +482,76 @@ class TransportService {
       );
       return null;
     }
+  }
+
+  /// True when every real (non-transfer) leg of [option] is a walk -
+  /// i.e. HERE found no real bus/train/taxi/bike alternative for this
+  /// trip at all, only walking. Shared by [_hasExcessiveWalk] (decides
+  /// whether a long walk gets an option dropped) and
+  /// [_tagIfWalkOnlyLong] (decides whether it gets tagged instead).
+  bool _isPureWalk(RideOption option) {
+    return !option.legs.any(
+      (leg) => !leg.isTransfer && leg.mode != TransportMode.walk,
+    );
+  }
+
+  /// True when [option] has a real walking leg longer than
+  /// [kMaxWalkLegMinutes] - on its own this says nothing about whether
+  /// [option] should be dropped or just labelled, see the two callers
+  /// below for that distinction.
+  bool _hasOverLimitWalk(RideOption option) {
+    return option.legs.any(
+      (leg) =>
+          leg.mode == TransportMode.walk &&
+          leg.duration.inMinutes > kMaxWalkLegMinutes,
+    );
+  }
+
+  /// True when [option] mixes a real walking leg longer than
+  /// [kMaxWalkLegMinutes] into an otherwise non-walking route (e.g. a
+  /// real "104" bus option HERE only reached via a genuinely long walk
+  /// to its first stop) - see that constant's own doc comment for why
+  /// this drops the whole option, and [_tagIfWalkOnlyLong] for the
+  /// different treatment a genuinely all-walking option gets instead of
+  /// being dropped here.
+  bool _hasExcessiveWalk(RideOption option) {
+    return !_isPureWalk(option) && _hasOverLimitWalk(option);
+  }
+
+  /// [RideOption] has no `copyWith` - this just rebuilds [option] with
+  /// [tag] prepended to its tags, every other field carried over
+  /// unchanged. Same pattern as TransportController._withTag (kept as
+  /// its own private copy here rather than a shared import, same
+  /// reasoning as every other small helper in this file).
+  RideOption _withTag(RideOption option, String tag) {
+    return RideOption(
+      id: option.id,
+      title: option.title,
+      legs: option.legs,
+      estCostRm: option.estCostRm,
+      co2Kg: option.co2Kg,
+      tags: [tag, ...option.tags],
+      isLiveData: option.isLiveData,
+      path: option.path,
+      searchDepartAt: option.searchDepartAt,
+      delayEstimate: option.delayEstimate,
+    );
+  }
+
+  /// A genuinely all-walking option (see [_isPureWalk]) is never
+  /// dropped just for exceeding [kMaxWalkLegMinutes] - unlike
+  /// [_hasExcessiveWalk]'s case, there's no shorter-walk alternative to
+  /// prefer instead, so filtering it out would just mean showing
+  /// nothing at all. Instead it's tagged [kWalkOnlyLongTag] so the
+  /// person sees clearly this is the only real route HERE found at
+  /// all, not an ordinary short walk that happens to run long.
+  RideOption _tagIfWalkOnlyLong(RideOption option) {
+    if (_isPureWalk(option) &&
+        _hasOverLimitWalk(option) &&
+        !option.tags.contains(kWalkOnlyLongTag)) {
+      return _withTag(option, kWalkOnlyLongTag);
+    }
+    return option;
   }
 
   /// Keeps only one option per distinct mode combination - keyed by each

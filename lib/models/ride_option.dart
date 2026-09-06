@@ -119,8 +119,18 @@ class RideOption {
   /// generator has no real bus/train numbers to show, so this falls
   /// back to plain [title] for those, and for any live leg HERE itself
   /// couldn't give a more specific name than the generic mode label.
+  ///
+  /// Only appended at all when every real leg rides the SAME mode (see
+  /// [_realModes]) - that's when the extra numbers actually help tell
+  /// two "Bus" options apart. Once a trip genuinely mixes modes (Bus +
+  /// Train + MRT), [title] already says as much on its own; piling every
+  /// one of those services' own real numbers on top ("Bus + Train + MRT
+  /// (709 + 802 + ETS + KJL)") just makes an already multi-word title
+  /// far too long to read at a glance for not much extra information -
+  /// every real service name is still there leg-by-leg once the trip's
+  /// own detail page is open.
   String get routeSummary {
-    if (!isLiveData) return title;
+    if (!isLiveData || _realModes.length > 1) return title;
     final realLabels = <String>[];
     for (final leg in legs) {
       if (leg.isTransfer || leg.mode == TransportMode.walk) continue;
@@ -137,6 +147,15 @@ class RideOption {
     }
     return realLabels.isEmpty ? title : '$title (${realLabels.join(' + ')})';
   }
+
+  /// Every distinct real (non-transfer, non-walk) mode this option
+  /// actually rides - see [routeSummary]. A plain `Set` rather than a
+  /// count alone so it stays legible at the call site (`.length > 1`
+  /// reads as "genuinely mixed modes", not a magic number).
+  Set<TransportMode> get _realModes => {
+    for (final leg in legs)
+      if (!leg.isTransfer && leg.mode != TransportMode.walk) leg.mode,
+  };
 
   String get co2Level {
     if (co2Kg <= 0.2) return 'Very Low';

@@ -1,15 +1,18 @@
-import 'package:flutter/foundation.dart' show debugPrint;
-import 'package:geolocator/geolocator.dart';
+import 'dart:math' as math;
 
-import '../data/heritage_data.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../data/transport_data.dart';
 import '../models/delay_estimate.dart';
-import '../models/heritage_attraction.dart';
 import '../models/location_point.dart';
 import '../models/ride_option.dart';
 import '../models/saved_trip.dart';
+import '../models/saved_trip_plan.dart';
 import '../models/transport_mode.dart';
 import '../services/location_service.dart';
+import '../services/planned_trip_transport_store.dart';
 import '../services/route_recommender_service.dart';
 import '../services/saved_trips_storage_service.dart';
 import '../services/transit_hop_finder.dart';
@@ -28,13 +31,23 @@ class TransportController {
     LocationService? locationService,
     SavedTripsStore? savedTripsStore,
     WeatherService? weatherService,
+    FirebaseAuth? auth,
+    FirebaseFirestore? firestore,
+    PlannedTripTransportStore? plannedTransportStore,
   }) : _locationService = locationService ?? const LocationService(),
        _savedTripsStore = savedTripsStore ?? SavedTripsStore.instance,
-       _weatherService = weatherService ?? const WeatherService();
+       _weatherService = weatherService ?? const WeatherService(),
+       _auth = auth ?? FirebaseAuth.instance,
+       _firestore = firestore ?? FirebaseFirestore.instance,
+       _plannedTransportStore =
+           plannedTransportStore ?? PlannedTripTransportStore.instance;
 
   final LocationService _locationService;
   final SavedTripsStore _savedTripsStore;
   final WeatherService _weatherService;
+  final FirebaseAuth _auth;
+  final FirebaseFirestore _firestore;
+  final PlannedTripTransportStore _plannedTransportStore;
 
   // ============================================================
   // LOCATION
@@ -207,59 +220,809 @@ class TransportController {
     return [badged, ...ranked.skip(1)];
   }
 
-  /// A real "Recommended For You" pick for RideHomePage's panel, shown
-  /// while no destination has been chosen yet (and reachable again after
-  /// a search via a header shortcut - see RideHomePage._showRecommendedSheet).
-  /// Picks the real cultural heritage attraction nearest [from] (the same
-  /// HeritageData this app's cultural heritage module already uses - see
-  /// HeritageNearbyService for the identical distance-based pattern) and
-  /// runs a real search to it via [searchRides], so this is a genuine,
-  /// bookable route, not an invented preview. This "nearest real place"
-  /// heuristic is a stand-in for genuine personalisation - see the
-  /// "Based on your travel plan and preferences" subtitle on the panel
-  /// itself - until a real travel-plan/preferences model exists to base
-  /// it on. Best-effort only: returns null if there's nowhere to
-  /// recommend or the search itself fails, so the panel (and its header
-  /// shortcut) just don't show rather than crashing the home page.
-  Future<RecommendedRide?> recommendedRideTo(LocationPoint from) async {
-    final attraction = _nearestAttraction(from);
-    if (attraction == null) return null;
+  /// What RideHomePage should show about "today's" saved-trip-plan
+  /// destination - shown while no destination has been chosen yet (and
+  /// reachable again after a search via a compact pinned card - see
+  /// RideHomePage's _TodaysPlanCard/RecommendedPanel usage).
+  ///
+  /// Based purely on the signed-in user's own active saved trip plan
+  /// (Firestore `saved_trip_plans`, written by the AI Trip Planner
+  /// module's GeneratedTripPage - see _nextDestinationFromSavedPlan) -
+  /// no invented/offline placeholder destination anymore. Returns null
+  /// - and the panel simply doesn't show, rather than displaying a guess
+  /// - whenever there's no signed-in user, no saved plan actually
+  /// running today (today between its startDate/endDate), the plan has
+  /// no attraction recorded for today, or that attraction's address
+  /// couldn't be geocoded into real coordinates.
+  ///
+  /// Which of [TodaysTransportStatus]'s two shapes comes back depends on
+  /// whether that plan's transportation has already been planned and
+  /// saved (see PlanTransportPage's Save action /
+  /// [getSavedTransportPlan]):
+  ///  - Not planned yet: runs a real search to the picked destination
+  ///    via [searchRides] and tags the result 'From Your Trip Plan', so
+  ///    RideHomePage can nudge the person to plan it - this is the
+  ///    original "recommendation" behaviour.
+  ///  - Already planned: no new search happens at all - the real leg
+  ///    for today is read straight back out of what was already saved,
+  ///    so RideHomePage can instead tell the person their ride for
+  ///    today is already sorted, rather than suggesting something
+  ///    they've already handled.
+  Future<TodaysTransportStatus?> todaysTransportStatus(
+    LocationPoint from,
+  ) async {
+    _TodaysPick? pick;
+    try {
+      pick = await _nextDestinationFromSavedPlan();
+    } catch (error) {
+      debugPrint('[TransportController] saved-plan lookup failed: $error');
+    }
+    if (pick == null) return null;
 
-    final to = LocationPoint(
-      name: attraction.name,
-      lat: attraction.latitude,
-      lng: attraction.longitude,
-    );
+    List<PlannedPlanLeg>? savedLegs;
+    try {
+      savedLegs = await getSavedTransportPlan(pick.planId);
+    } catch (error) {
+      debugPrint(
+        '[TransportController] saved-transport-plan lookup failed: $error',
+      );
+    }
+
+    if (savedLegs != null && savedLegs.isNotEmpty) {
+      final todaysLeg = savedLegs.firstWhere(
+        (leg) => leg.day == pick!.dayIndex,
+        orElse: () => savedLegs!.first,
+      );
+      return TodaysTransportStatus.alreadyPlanned(todaysLeg);
+    }
+
     try {
       final result = await searchRides(
         from: from,
-        to: to,
+        to: pick.point,
         departAt: DateTime.now(),
       );
       if (result.options.isEmpty) return null;
-      return RecommendedRide(to: to, option: result.options.first);
+      final option = _withTag(result.options.first, 'From Your Trip Plan');
+      return TodaysTransportStatus.suggestion(
+        RecommendedRide(to: pick.point, option: option),
+      );
     } catch (error) {
-      debugPrint('[TransportController] recommendedRideTo failed: $error');
+      debugPrint(
+        '[TransportController] todaysTransportStatus search failed: $error',
+      );
       return null;
     }
   }
 
-  HeritageAttraction? _nearestAttraction(LocationPoint from) {
-    HeritageAttraction? nearest;
-    var nearestMeters = double.infinity;
-    for (final attraction in HeritageData.attractions) {
-      final meters = Geolocator.distanceBetween(
-        from.lat,
-        from.lng,
-        attraction.latitude,
-        attraction.longitude,
-      );
-      if (meters < nearestMeters) {
-        nearestMeters = meters;
-        nearest = attraction;
+  /// Looks for today's destination in the signed-in user's own active
+  /// saved trip plan - see [todaysTransportStatus]'s doc comment. Only
+  /// ever looks at plans this exact user saved (`userId` ==
+  /// FirebaseAuth's current uid) with `status == 'saved'` (a plan that
+  /// was since un-saved is simply deleted, per
+  /// GeneratedTripPage._toggleSavePlan - this check is just
+  /// future-proofing against a soft-delete status being added later)
+  /// whose [startDate, endDate] window (inclusive) covers today - a plan
+  /// for a trip that hasn't started yet or has already ended isn't
+  /// "next", it's irrelevant right now.
+  ///
+  /// Within a matching plan, picks the attraction recorded for TODAY's
+  /// own day-index (`day` - 1-indexed from the plan's startDate, see
+  /// GeneratedTripPage._getAttractionDay, the only place that writes
+  /// it), falling back to the plan's very first attraction if today's
+  /// exact day somehow has none (e.g. a plan saved with an uneven
+  /// attractions-per-day split). Returns null (never throws) if there's
+  /// no signed-in user, no matching plan, or the picked attraction's
+  /// address can't be geocoded into real coordinates - this module
+  /// doesn't import the planning module's own models, it only reads the
+  /// raw fields GeneratedTripPage itself writes, so a shape it doesn't
+  /// recognise is skipped rather than crashing this whole panel.
+  Future<_TodaysPick?> _nextDestinationFromSavedPlan() async {
+    final user = _auth.currentUser;
+    if (user == null) return null;
+
+    final snapshot = await _firestore
+        .collection('saved_trip_plans')
+        .where('userId', isEqualTo: user.uid)
+        .where('status', isEqualTo: 'saved')
+        .get();
+    if (snapshot.docs.isEmpty) return null;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final startTimestamp = data['startDate'];
+      final endTimestamp = data['endDate'];
+      if (startTimestamp is! Timestamp || endTimestamp is! Timestamp) {
+        continue;
+      }
+
+      final start = startTimestamp.toDate();
+      final end = endTimestamp.toDate();
+      final startDate = DateTime(start.year, start.month, start.day);
+      final endDate = DateTime(end.year, end.month, end.day);
+      if (today.isBefore(startDate) || today.isAfter(endDate)) continue;
+
+      final attractions = data['attractions'];
+      if (attractions is! List || attractions.isEmpty) continue;
+
+      final todayDayIndex = today.difference(startDate).inDays + 1;
+      Map<String, dynamic>? pick;
+      for (final raw in attractions) {
+        if (raw is! Map) continue;
+        final attraction = Map<String, dynamic>.from(raw);
+        if (attraction['day'] == todayDayIndex) {
+          pick = attraction;
+          break;
+        }
+      }
+      pick ??= Map<String, dynamic>.from(attractions.first as Map);
+
+      final point = await _geocodeSavedPlanAttraction(pick);
+      if (point != null) {
+        return _TodaysPick(planId: doc.id, dayIndex: todayDayIndex, point: point);
+      }
+      // This plan's pick didn't geocode - keep checking any other
+      // active plan (rare: overlapping saved plans) rather than giving
+      // up on the very first match.
+    }
+    return null;
+  }
+
+  /// Resolves a saved-plan attraction's real coordinates. The planning
+  /// module's own AttractionModel has no latitude/longitude of its own
+  /// (only a text address/area/state - see attraction.dart), so this
+  /// goes through the exact same real geocoding path a manually typed
+  /// "To" field uses (LocationService.searchPlace, HERE Autosuggest with
+  /// a free Nominatim fallback) rather than needing a second data
+  /// source. Tries the full street address first (most specific), then
+  /// falls back to "name, area" if that doesn't resolve - some
+  /// attractions only have a short/informal address on file.
+  /// Geocodes one saved-plan attraction for real transportation
+  /// planning, trying progressively broader real queries before giving
+  /// up entirely - the same idea DestinationPhotoService already uses
+  /// for header photos (street -> area -> city -> ... before it falls
+  /// back to a plain map pin): a plan's own saved `address` string is
+  /// often incomplete or oddly formatted for a general-purpose
+  /// geocoder, but combining it with the attraction's own name, or
+  /// falling back to the name/area on their own, regularly resolves a
+  /// real point where the bare address alone doesn't. Every candidate
+  /// is a genuine geocoder lookup - never a guessed/interpolated
+  /// coordinate - so a real result here is exactly as trustworthy as
+  /// before, there's just more real chances taken before this reports
+  /// "couldn't find this attraction's location at all" (see
+  /// planTransportationForPlan/retryPlanLeg's own handling of a null
+  /// result).
+  Future<LocationPoint?> _geocodeSavedPlanAttraction(
+    Map<String, dynamic> attraction,
+  ) async {
+    final name = (attraction['name'] as String?)?.trim() ?? '';
+    final address = (attraction['address'] as String?)?.trim() ?? '';
+    final area = (attraction['area'] as String?)?.trim() ?? '';
+
+    final candidates = <String>[
+      if (name.isNotEmpty && address.isNotEmpty) '$name, $address',
+      if (address.isNotEmpty) address,
+      if (name.isNotEmpty && area.isNotEmpty) '$name, $area',
+      if (name.isNotEmpty) name,
+      if (area.isNotEmpty) area,
+    ];
+
+    final tried = <String>{};
+    for (final query in candidates) {
+      if (!tried.add(query)) continue; // an exact repeat - skip it
+      try {
+        final point = await _locationService.searchPlace(query);
+        if (point != null) return point;
+      } catch (error) {
+        debugPrint(
+          '[TransportController] geocode attempt failed for "$query": '
+          '$error',
+        );
       }
     }
-    return nearest;
+    return null;
+  }
+
+  // ============================================================
+  // TRIP PLANS (whole-plan transportation)
+  // ============================================================
+
+  /// Every saved trip plan (Firestore `saved_trip_plans`, written by the
+  /// AI Trip Planner module's GeneratedTripPage) the signed-in user has
+  /// that hasn't ended yet (today <= endDate) - unlike
+  /// _nextDestinationFromSavedPlan's stricter "running today" test, this
+  /// deliberately also includes a plan that hasn't started yet, since
+  /// TripPlansPage's whole point is showing every upcoming/ongoing trip
+  /// worth planning transportation for, not just today's single pick.
+  /// Sorted soonest-starting first.
+  ///
+  /// Throws (rather than returning an empty list) when there's no
+  /// signed-in user, so TripPlansPage can show "please log in" instead
+  /// of a misleading "you have no trip plans".
+  Future<List<SavedTripPlan>> getActiveSavedPlans() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('Please log in to see your trip plans.');
+    }
+
+    final snapshot = await _firestore
+        .collection('saved_trip_plans')
+        .where('userId', isEqualTo: user.uid)
+        .where('status', isEqualTo: 'saved')
+        .get();
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final plans = snapshot.docs
+        .map((doc) => SavedTripPlan.fromFirestore(doc.id, doc.data()))
+        .where((plan) {
+          final end = DateTime(
+            plan.endDate.year,
+            plan.endDate.month,
+            plan.endDate.day,
+          );
+          return !today.isAfter(end);
+        })
+        .toList();
+    plans.sort((a, b) => a.startDate.compareTo(b.startDate));
+    return plans;
+  }
+
+  /// Plans a real transportation leg for every attraction in [plan], day
+  /// by day - "plan transportation for the whole trip", not just one
+  /// destination (see PlanTransportPage, the only caller). Each day
+  /// starts fresh from [startingFrom] (the person's own current
+  /// location - this assumes a day-trip pattern, going out from and
+  /// back to the same base each day, not staying overnight AT an
+  /// attraction).
+  ///
+  /// This works BACKWARDS from a deadline, not forwards from a guess:
+  /// the itinerary the person already committed to (day starts 9am,
+  /// each attraction visited for its own real recommended duration,
+  /// gap between stops per the travel-style buffer - the exact same
+  /// shape as the AI Trip Planner module's own
+  /// _buildLogicalSchedule/_bufferMinutes, using the SAME saved data
+  /// that module wrote: see SavedTripPlanAttraction) fixes each
+  /// attraction's own "must be there by" deadline FIRST - see
+  /// [_estimateTravelMinutes], a rough straight-line-distance estimate
+  /// that only ever feeds this target schedule, mirroring the role
+  /// AiTripPlannerController.estimateTransportMinutes plays in that
+  /// module. Only THEN does this method go looking for the real
+  /// transportation to hit that deadline (see
+  /// [_planLegToMeetDeadline]): first a real [searchRides] departing as
+  /// soon as the person is free, and if that real schedule would
+  /// actually arrive too late, real searches at progressively earlier
+  /// departure times, keeping the latest real service that still makes
+  /// it - i.e. reverse-engineering roughly when transport needs to
+  /// happen from the required arrival time, exactly as asked, rather
+  /// than letting a live search result silently reshape the plan the
+  /// person already made. If no real service can make the deadline
+  /// after a few tries, the closest real option found is still shown
+  /// (never a fabricated one - see TransportService's own doc comment)
+  /// but [PlannedPlanLeg.warning] says so plainly instead of hiding it.
+  ///
+  /// Runs one search at a time, not in parallel: each attraction's
+  /// search needs the previous one's real arrival point first, and a
+  /// whole trip is a handful of searches at most - not worth the
+  /// added complexity/rate-limit risk of firing them all at once.
+  /// Never throws: a single attraction that can't be geocoded or
+  /// doesn't return a real route just gets a [PlannedPlanLeg] with a
+  /// null [PlannedPlanLeg.option] so the rest of the plan still comes
+  /// back, and the person can see exactly which day/attraction needs a
+  /// manual look instead of the whole plan silently failing.
+  Future<List<PlannedPlanLeg>> planTransportationForPlan(
+    SavedTripPlan plan, {
+    required LocationPoint startingFrom,
+  }) async {
+    final legs = <PlannedPlanLeg>[];
+    final totalDays = plan.totalDays <= 0 ? 1 : plan.totalDays;
+    final bufferMinutes = _bufferMinutesForStyle(plan.travelStyle);
+
+    for (var day = 1; day <= totalDays; day++) {
+      final dayAttractions = plan.attractionsForDay(day);
+      if (dayAttractions.isEmpty) continue;
+
+      // DateTime.utc here (not the plain DateTime(...) this used to
+      // use) - not because this day is "in UTC", but because every
+      // schedule DateTime this method builds (dayDate/freeFrom/deadline
+      // below, and SavedTripPlanAttraction.openingDateTime/
+      // closingDateTime) needs to live in the SAME representation as a
+      // live search result's own departTime/arriveTime coming back
+      // from TransportService: a real HERE result's time, after
+      // HereTransitService._parseTime's instantToMalaysiaWallClock fix,
+      // is a DateTime that's flagged isUtc but whose year/month/day/
+      // hour/minute fields ARE the Malaysia wall-clock numbers - see
+      // that function's own doc comment. Building this method's own
+      // "9am on this trip day" via plain DateTime(...) instead put it
+      // in a completely different representation (a genuine real
+      // instant, correct only on a device whose OWN system timezone
+      // happens to be Malaysia's) - comparing or subtracting the two
+      // (best.arriveTime.isAfter(deadline) below, or
+      // idealDepart.difference(best.departTime) in the pure-walk
+      // branch) was silently comparing/subtracting two DateTimes that
+      // each meant something different, off by however many hours the
+      // device's real timezone differs from Malaysia's fixed UTC+8 -
+      // exactly how a bus that genuinely arrives hours BEFORE a visit
+      // deadline still got flagged as "late" (see this method's
+      // deadline-check just below), and how the pure-walk branch's own
+      // fix still came out shifted by roughly that same 8 hours. Using
+      // DateTime.utc consistently here - the same convention
+      // instantToMalaysiaWallClock's output already uses - makes every
+      // comparison in this method a same-representation comparison
+      // regardless of what timezone any given device is actually set
+      // to.
+      final dayDate = DateTime.utc(
+        plan.startDate.year,
+        plan.startDate.month,
+        plan.startDate.day + (day - 1),
+      );
+
+      var from = startingFrom;
+      // The itinerary's own fixed schedule - when the person is free to
+      // leave for the NEXT attraction. Never overwritten by a real
+      // search result (see this method's doc comment) - only ever
+      // advanced by real, known quantities: the previous attraction's
+      // own visit length and the travel-style buffer.
+      var freeFrom = DateTime.utc(dayDate.year, dayDate.month, dayDate.day, 9);
+
+      for (final attraction in dayAttractions) {
+        LocationPoint? to;
+        try {
+          to = await _geocodeSavedPlanAttraction({
+            'name': attraction.name,
+            'address': attraction.address,
+            'area': attraction.area,
+          });
+        } catch (error) {
+          debugPrint(
+            '[TransportController] geocoding failed for '
+            '${attraction.name}: $error',
+          );
+        }
+
+        // The deadline: the itinerary's own target arrival time for
+        // this attraction, worked out from a rough travel-time estimate
+        // (never a real search) plus this attraction's real opening
+        // time - the same "arrive by X" the person already planned.
+        var deadline = to != null
+            ? freeFrom.add(
+                Duration(minutes: _estimateTravelMinutes(from, to)),
+              )
+            : freeFrom;
+        final openingAt = attraction.openingDateTime(dayDate);
+        if (deadline.isBefore(openingAt)) deadline = openingAt;
+
+        RideOption? option;
+        String? warning;
+        if (to != null) {
+          final probe = await _planLegToMeetDeadline(
+            from: from,
+            to: to,
+            earliestDepart: freeFrom,
+            deadline: deadline,
+          );
+          option = probe.option;
+          warning = probe.warning;
+        }
+
+        // visitStart is the REAL time the person is expected to be at
+        // this attraction - so once a real option was actually found,
+        // use ITS real arrival time (clamped so it's never before the
+        // attraction's own real opening time - arriving early doesn't
+        // let you start visiting before it opens), not [deadline]
+        // (which was only ever a rough target used to decide what time
+        // to search transport FOR, not a promise of when transport
+        // would actually get you there - see this method's own doc
+        // comment on [_estimateTravelMinutes]). A real bus that
+        // genuinely gets you there earlier - or, with a warning, later
+        // - than the rough target should show up as exactly that
+        // arrival time, not the original guess, so the "Visit" window
+        // always describes the itinerary this leg's OWN real
+        // transportation actually produces. Only falls back to
+        // [deadline] when there's no real option at all (couldn't
+        // geocode, or no route found - see [_UnplannedLegTile]).
+        final visitStart = option != null
+            ? (option.arriveTime.isBefore(openingAt)
+                  ? openingAt
+                  : option.arriveTime)
+            : deadline;
+        final visitEnd = visitStart.add(
+          Duration(minutes: attraction.recommendedVisitMinutes),
+        );
+
+        legs.add(
+          PlannedPlanLeg(
+            day: day,
+            attractionName: attraction.name,
+            from: from,
+            to: to,
+            option: option,
+            visitStart: visitStart,
+            visitEnd: visitEnd,
+            warning: warning,
+          ),
+        );
+
+        // Chain the NEXT attraction in this same day from here, so a
+        // multi-stop day reads as a real point-to-point itinerary
+        // rather than every stop routing from the morning starting
+        // point again.
+        if (to != null) from = to;
+        freeFrom = visitEnd.add(Duration(minutes: bufferMinutes));
+      }
+    }
+
+    return legs;
+  }
+
+  /// Retries planning ONE leg that previously failed - see
+  /// PlanTransportPage's Retry / "Change starting point" actions on an
+  /// unplanned leg, the only caller. Re-geocodes [attraction] (in case
+  /// the original failure was there), then searches for a real route
+  /// from [from] to it, targeting [visitStart] as the deadline the same
+  /// way the original whole-day pass did (see _planLegToMeetDeadline) -
+  /// [from] can be the leg's original starting point (a plain retry,
+  /// for a transient failure) or one the person just corrected (when
+  /// the real problem was a bad starting point, not the attraction
+  /// itself). [day]/[visitStart]/[visitEnd] are carried over unchanged
+  /// from the leg being retried, since only where the search starts
+  /// from - not the plan's own itinerary - is what's being redone
+  /// here.
+  ///
+  /// Never throws - a failed retry just comes back as the same kind of
+  /// "couldn't find a route" [PlannedPlanLeg] as before (with
+  /// [PlannedPlanLeg.warning] explaining why), not an error the person
+  /// has to handle separately from the ones planTransportationForPlan
+  /// itself can already produce.
+  Future<PlannedPlanLeg> retryPlanLeg({
+    required LocationPoint from,
+    required SavedTripPlanAttraction attraction,
+    required int day,
+    required DateTime visitStart,
+    required DateTime visitEnd,
+  }) async {
+    // The visit LENGTH is the one thing worth preserving unchanged from
+    // the leg being retried (this attraction's own recommended visit
+    // duration) - [visitStart] itself gets recomputed below from
+    // whatever real option this retry actually finds, same reasoning
+    // as planTransportationForPlan's own visitStart (see that leg's
+    // doc comment).
+    final plannedVisitLength = visitEnd.difference(visitStart);
+
+    LocationPoint? to;
+    try {
+      to = await _geocodeSavedPlanAttraction({
+        'name': attraction.name,
+        'address': attraction.address,
+        'area': attraction.area,
+      });
+    } catch (error) {
+      debugPrint('[TransportController] retry geocoding failed: $error');
+    }
+
+    if (to == null) {
+      return PlannedPlanLeg(
+        day: day,
+        attractionName: attraction.name,
+        from: from,
+        visitStart: visitStart,
+        visitEnd: visitEnd,
+        warning: "Still couldn't find this attraction's address.",
+      );
+    }
+
+    final probe = await _planLegToMeetDeadline(
+      from: from,
+      to: to,
+      earliestDepart: visitStart.subtract(const Duration(hours: 3)),
+      deadline: visitStart,
+    );
+
+    // Same DateTime.utc convention as planTransportationForPlan's own
+    // dayDate (see that method's doc comment) - built from [visitStart]
+    // itself since a retry doesn't have the day's own dayDate handy,
+    // just this one leg's already-resolved DateTimes.
+    final dayDate = DateTime.utc(
+      visitStart.year,
+      visitStart.month,
+      visitStart.day,
+    );
+    final openingAt = attraction.openingDateTime(dayDate);
+    final option = probe.option;
+    final actualVisitStart = option != null
+        ? (option.arriveTime.isBefore(openingAt)
+              ? openingAt
+              : option.arriveTime)
+        : visitStart;
+
+    return PlannedPlanLeg(
+      day: day,
+      attractionName: attraction.name,
+      from: from,
+      to: to,
+      option: option,
+      visitStart: actualVisitStart,
+      visitEnd: actualVisitStart.add(plannedVisitLength),
+      warning: probe.warning,
+    );
+  }
+
+  // ============================================================
+  // WHOLE-PLAN TRANSPORTATION - PERSISTENCE
+  // ============================================================
+
+  /// The transportation plan already saved for [planId] (see
+  /// [saveTransportPlan]), or null if this trip plan hasn't had its
+  /// transportation planned/saved yet. PlanTransportPage checks this
+  /// first so reopening an already-planned trip doesn't re-run every
+  /// search; TransportController.todaysTransportStatus checks it so
+  /// RideHomePage can tell the difference between "please plan this"
+  /// and "you already did".
+  Future<List<PlannedPlanLeg>?> getSavedTransportPlan(String planId) async {
+    final rawLegs = await _plannedTransportStore.get(planId);
+    if (rawLegs == null) return null;
+    return rawLegs.map(PlannedPlanLeg.fromJson).toList();
+  }
+
+  /// Persists [legs] (the result of [planTransportationForPlan]) as
+  /// [planId]'s saved transportation plan - see PlanTransportPage's Save
+  /// action, the only caller. Overwrites whatever was saved before, so
+  /// "re-plan" is just calling this again with a freshly computed list.
+  Future<void> saveTransportPlan(
+    String planId,
+    List<PlannedPlanLeg> legs,
+  ) {
+    return _plannedTransportStore.save(
+      planId,
+      legs.map((leg) => leg.toJson()).toList(),
+    );
+  }
+
+  /// Removes [planId]'s saved transportation plan entirely, so it goes
+  /// back to showing as "not planned yet" (see [plannedTransportPlanIds]
+  /// / TripPlansPage's badge).
+  Future<void> deleteTransportPlan(String planId) {
+    return _plannedTransportStore.remove(planId);
+  }
+
+  /// Which of [planIds] already have a saved transportation plan - used
+  /// by TripPlansPage to badge each trip plan "Transport planned" vs
+  /// "Not planned yet" without a read per plan.
+  Future<Set<String>> plannedTransportPlanIds(Iterable<String> planIds) {
+    return _plannedTransportStore.plannedPlanIds(planIds);
+  }
+
+  /// Finds the real transportation to reach [to] by [deadline], working
+  /// backwards when needed - see planTransportationForPlan's doc
+  /// comment for why. First tries departing as soon as the person is
+  /// free ([earliestDepart]); if that real schedule already makes the
+  /// deadline, that's the answer. If not - the real trip takes longer
+  /// than the plan assumed - retries a few real searches at
+  /// progressively earlier departure times (never a guess in the other
+  /// direction: only ever pulling the search earlier, never later than
+  /// [earliestDepart], since the person genuinely isn't free before
+  /// then), keeping the latest real option that still makes it. If none
+  /// of those do either, the closest real option found is returned
+  /// with [_LegProbeResult.warning] set, instead of silently keeping a
+  /// late option or hiding the problem.
+  ///
+  /// Every real result is re-dated onto [deadline]'s own calendar day
+  /// (see the local alignToTargetDay helper below) before it's compared against
+  /// [deadline] at all, or ever handed back for display - a live search
+  /// can come back on a genuinely different real date than the one
+  /// asked for (e.g. HERE silently answering "the next real departure
+  /// from right now" when the requested time has already passed in the
+  /// real world, which happens whenever a plan's fixed 9am-start
+  /// assumption for "today" is itself already behind real time), and
+  /// comparing/showing that against a deadline on the INTENDED day
+  /// produced exactly the nonsense this fixes: a real "Live Route" card
+  /// confidently showing an evening departure right next to an 11am
+  /// visit window, with no warning at all because the raw comparison
+  /// (today's evening vs. some other day's late morning) accidentally
+  /// came out "on time". Re-dating first means the deadline check - and
+  /// the Departs/Est. Arrival shown on the card - always land on the
+  /// same day the itinerary actually means, so a real mismatch like
+  /// that shows up as a genuine miss (and the honest warning below)
+  /// instead of a false pass.
+  /// True when every real (non-transfer) leg of [option] is a walk -
+  /// i.e. there's no real bus/train/taxi/bike alternative at all, only
+  /// walking. Same check as TransportService._isPureWalk (kept as its
+  /// own private copy here rather than a shared import, same reasoning
+  /// as every other small per-file helper in this module) - used by
+  /// [_planLegToMeetDeadline] to skip its schedule-retry loop for a
+  /// walk, which has no real schedule to retry against.
+  bool _isPureWalkOption(RideOption option) {
+    return !option.legs.any(
+      (leg) => !leg.isTransfer && leg.mode != TransportMode.walk,
+    );
+  }
+
+  Future<_LegProbeResult> _planLegToMeetDeadline({
+    required LocationPoint from,
+    required LocationPoint to,
+    required DateTime earliestDepart,
+    required DateTime deadline,
+  }) async {
+    // DateTime.utc, not DateTime(...) - see planTransportationForPlan's
+    // dayDate/freeFrom doc comment: deadline/option.departTime are both
+    // already in that same "isUtc but fields are Malaysia wall clock"
+    // representation, so targetDay/optionDay need to be built in it too
+    // for dayShift below to come out as a clean whole-day difference
+    // instead of being skewed by whatever the device's real timezone
+    // happens to be.
+    final targetDay = DateTime.utc(
+      deadline.year,
+      deadline.month,
+      deadline.day,
+    );
+
+    RideOption alignToTargetDay(RideOption option) {
+      final optionDay = DateTime.utc(
+        option.departTime.year,
+        option.departTime.month,
+        option.departTime.day,
+      );
+      final dayShift = targetDay.difference(optionDay);
+      return dayShift == Duration.zero
+          ? option
+          : withTimeShifted(option, dayShift);
+    }
+
+    try {
+      final firstTry = await searchRides(from: from, to: to, departAt: earliestDepart);
+      if (firstTry.options.isEmpty) return const _LegProbeResult();
+
+      var best = alignToTargetDay(firstTry.options.first);
+      if (!best.arriveTime.isAfter(deadline)) {
+        return _LegProbeResult(option: best);
+      }
+
+      // A pure walk (no real bus/train/taxi/bike alternative at all -
+      // see _isPureWalkOption) has no real schedule to retry against:
+      // walking the same real distance takes the same real duration no
+      // matter what time of day you start, so the retry loop below
+      // (built for a SCHEDULED service that might genuinely run again
+      // earlier) can never find anything different for a walk - it
+      // would just keep pushing attemptDepart backwards by roughly the
+      // same "overage" every time, wrapping through however many
+      // calendar days it takes to close a gap a walk's own fixed
+      // duration can never close, and alignToTargetDay would then
+      // re-date whatever wall-clock hour that lands on back onto
+      // today - producing exactly a "Walk departs 9:49pm" next to an
+      // 11am visit window. Instead, work out directly when the walk
+      // SHOULD start: as late as possible while still meeting the
+      // deadline, but never before the person is actually free to
+      // leave ([earliestDepart]) - if even leaving the moment they're
+      // free still wouldn't make it, that's a genuine, honestly
+      // reported miss (the warning below), not something retrying a
+      // walk can ever fix.
+      if (_isPureWalkOption(best)) {
+        final walkDuration = best.arriveTime.difference(best.departTime);
+        var idealDepart = deadline.subtract(walkDuration);
+        if (idealDepart.isBefore(earliestDepart)) idealDepart = earliestDepart;
+        final shifted = withTimeShifted(
+          best,
+          idealDepart.difference(best.departTime),
+        );
+        if (!shifted.arriveTime.isAfter(deadline)) {
+          return _LegProbeResult(option: shifted);
+        }
+        return _LegProbeResult(
+          option: shifted,
+          warning:
+              'Real transport to this attraction takes longer than the '
+              'planned schedule allows for - you may arrive later than '
+              'planned.',
+        );
+      }
+
+      var attemptDepart = earliestDepart;
+      for (var attempt = 0; attempt < 3; attempt++) {
+        final overage = best.arriveTime.difference(deadline);
+        attemptDepart = attemptDepart.subtract(
+          overage + const Duration(minutes: 10),
+        );
+        // Never try - or accept - a departure at or before
+        // [earliestDepart] itself: that's the earliest real moment the
+        // person is actually free to leave (see this method's own
+        // parameter doc comment), so a "real" service found by
+        // searching further back than that is a genuine, correctly
+        // scheduled bus/train the person simply CANNOT catch - not a
+        // usable answer, no matter how good it looks on paper (this
+        // used to only cap the search a full day before earliestDepart,
+        // which is how a bus that genuinely runs at 5:30am could get
+        // returned as "the plan" for someone who isn't even free to
+        // leave until 9am). [firstTry] already searched exactly at
+        // earliestDepart, so once subtracting would put us at or
+        // before it, there's nothing further back worth trying - stop
+        // and fall through to the honest "couldn't make it in time"
+        // warning below instead of a technically-on-time-but-actually-
+        // uncatchable option.
+        if (!attemptDepart.isAfter(earliestDepart)) {
+          break;
+        }
+
+        final retry = await searchRides(from: from, to: to, departAt: attemptDepart);
+        if (retry.options.isEmpty) break;
+
+        best = alignToTargetDay(retry.options.first);
+        if (!best.arriveTime.isAfter(deadline)) {
+          return _LegProbeResult(option: best);
+        }
+      }
+
+      return _LegProbeResult(
+        option: best,
+        warning:
+            'Real transport to this attraction takes longer than the '
+            'planned schedule allows for - you may arrive later than '
+            'planned.',
+      );
+    } catch (error) {
+      debugPrint('[TransportController] backward leg planning failed: $error');
+      return const _LegProbeResult();
+    }
+  }
+
+  /// A rough straight-line-distance estimate of travel time between two
+  /// points, in minutes - used ONLY to build the day's fixed target
+  /// schedule (see planTransportationForPlan), the same role
+  /// AiTripPlannerController.estimateTransportMinutes plays in that
+  /// module's own schedule. Never used as if it were a real transit
+  /// time itself - the real time always comes from a genuine
+  /// [searchRides] call in [_planLegToMeetDeadline].
+  int _estimateTravelMinutes(LocationPoint from, LocationPoint to) {
+    const earthRadiusKm = 6371.0;
+    final lat1 = from.lat * (math.pi / 180);
+    final lat2 = to.lat * (math.pi / 180);
+    final dLat = (to.lat - from.lat) * (math.pi / 180);
+    final dLng = (to.lng - from.lng) * (math.pi / 180);
+    final a =
+        math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1) * math.cos(lat2) * math.sin(dLng / 2) * math.sin(dLng / 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    final distanceKm = earthRadiusKm * c;
+    // ~25 km/h average, accounting for transfers/walking/local roads -
+    // deliberately conservative since this only sets the TARGET
+    // deadline, never a real search result.
+    const assumedKmPerHour = 25.0;
+    final minutes = (distanceKm / assumedKmPerHour * 60).round();
+    return minutes.clamp(5, 240);
+  }
+
+  /// Same buffer-between-stops rule as
+  /// AiTripPlannerController._bufferMinutes, mirrored here for the same
+  /// reason as SavedTripPlanAttraction's own mirrored parsing helpers -
+  /// see planTransportationForPlan's doc comment.
+  int _bufferMinutesForStyle(String? travelStyle) {
+    final style = (travelStyle ?? '').toLowerCase();
+    if (style.contains('relax')) return 20;
+    if (style.contains('adventure')) return 8;
+    return 12;
+  }
+
+  /// [RideOption] has no `copyWith` - this just rebuilds [option] with
+  /// [tag] prepended to its tags, every other field carried over
+  /// unchanged. Shared by todaysTransportStatus (tags a saved-trip-plan
+  /// pick so RideCard shows why it was suggested, the same way "AI
+  /// Recommended" already explains searchRides' top pick).
+  RideOption _withTag(RideOption option, String tag) {
+    return RideOption(
+      id: option.id,
+      title: option.title,
+      legs: option.legs,
+      estCostRm: option.estCostRm,
+      co2Kg: option.co2Kg,
+      tags: [tag, ...option.tags],
+      isLiveData: option.isLiveData,
+      path: option.path,
+      searchDepartAt: option.searchDepartAt,
+      delayEstimate: option.delayEstimate,
+    );
   }
 
   /// Every real HERE alternative for one specific leg of an already-
@@ -397,17 +1160,63 @@ class TransportController {
   }
 }
 
-/// See TransportController.recommendedRideTo/RideHomePage's
-/// RecommendedPanel. [to] is what gets filled into the "To" field once
-/// the person taps the panel/sheet - [option] is only the preview ride
-/// shown on it (a fresh search still runs on tap, same as picking any
-/// other real destination, since [option]'s own times/availability can
-/// go stale the longer it sits on screen unpicked).
+/// See TransportController.todaysTransportStatus/RideHomePage's
+/// RecommendedPanel. [option] IS the recommendation - the best real
+/// route already found for it - so tapping the panel opens straight
+/// into its own detail page (RideHomePage._selectRecommended), not a
+/// fresh search that would hand back a whole list to choose from again.
+/// [to] is only kept alongside it for whatever still needs the plain
+/// destination point on its own (e.g. RecommendedRide.to's own callers
+/// before this leg has a detail page open yet).
 class RecommendedRide {
   const RecommendedRide({required this.to, required this.option});
 
   final LocationPoint to;
   final RideOption option;
+}
+
+/// What RideHomePage shows about "today's" saved-trip-plan destination -
+/// see TransportController.todaysTransportStatus, the only place this
+/// is built. Exactly one of [suggestion]/[plannedLeg] is set:
+///  - [TodaysTransportStatus.suggestion]: nothing's been planned for
+///    today's destination yet - RideHomePage shows the original
+///    "Recommended For You" nudge (RecommendedPanel/_TodaysPlanCard),
+///    tapping which opens that recommended route's own detail page
+///    directly (see RideHomePage._selectRecommended).
+///  - [TodaysTransportStatus.alreadyPlanned]: the person already saved
+///    a whole-trip transportation plan that covers today (see
+///    PlanTransportPage's Save action) - RideHomePage shows a
+///    non-actionable-search "you're set for today" card instead,
+///    reading the real leg straight back from what was saved rather
+///    than re-suggesting a plan already handled.
+class TodaysTransportStatus {
+  const TodaysTransportStatus.suggestion(this.suggestion) : plannedLeg = null;
+
+  const TodaysTransportStatus.alreadyPlanned(this.plannedLeg)
+    : suggestion = null;
+
+  final RecommendedRide? suggestion;
+  final PlannedPlanLeg? plannedLeg;
+
+  bool get isAlreadyPlanned => plannedLeg != null;
+}
+
+/// The signed-in user's own active saved trip plan's pick for today -
+/// see TransportController._nextDestinationFromSavedPlan, the only
+/// place this is built. Carries the plan's own Firestore document id
+/// (so a saved transport plan can be looked up for it - see
+/// [TodaysTransportStatus]) alongside today's real day-index and
+/// geocoded point.
+class _TodaysPick {
+  const _TodaysPick({
+    required this.planId,
+    required this.dayIndex,
+    required this.point,
+  });
+
+  final String planId;
+  final int dayIndex;
+  final LocationPoint point;
 }
 
 /// See TransportController.checkSavedTripsForRain/swapRainyBikeLeg.
@@ -416,4 +1225,105 @@ class RainyBikeAlert {
 
   final SavedTrip trip;
   final int legIndex;
+}
+
+/// One computed leg of a whole-plan itinerary - see
+/// TransportController.planTransportationForPlan. [option] (and [to])
+/// are null when this specific attraction's address couldn't be
+/// geocoded, or no real route could be found for it - PlanTransportPage
+/// shows that leg as "couldn't plan this one" rather than silently
+/// dropping it, so a person can see exactly which day/attraction needs
+/// a manual look.
+class PlannedPlanLeg {
+  const PlannedPlanLeg({
+    required this.day,
+    required this.attractionName,
+    required this.from,
+    this.to,
+    this.option,
+    required this.visitStart,
+    required this.visitEnd,
+    this.warning,
+  });
+
+  /// 1-indexed day within the plan - see
+  /// SavedTripPlanAttraction.day's doc comment.
+  final int day;
+  final String attractionName;
+
+  /// Where this leg's search actually started from - the person's own
+  /// current location for the first attraction of a day, or the
+  /// previous attraction's own real point for a later one that same day
+  /// (see planTransportationForPlan's chaining).
+  final LocationPoint from;
+  final LocationPoint? to;
+  final RideOption? option;
+
+  /// This attraction's own planned visit window - when the person is
+  /// actually expected to be AT this attraction, not the ride to get
+  /// there. [visitStart] is [option]'s own real arrival time (clamped
+  /// to this attraction's real opening time) whenever a real option was
+  /// found - see planTransportationForPlan/retryPlanLeg's own doc
+  /// comments on why this reflects the actual transportation rather
+  /// than the rough target deadline it was searched against - and
+  /// falls back to that rough deadline only when there's no real option
+  /// at all ([option] null). [visitEnd] is [visitStart] plus this
+  /// attraction's own recommended visit length.
+  final DateTime visitStart;
+  final DateTime visitEnd;
+
+  /// Set when no real transportation could be found that reaches [to]
+  /// by [visitStart] - [option] is still the closest real one found
+  /// (never a fabricated one), but the person should know the planned
+  /// arrival time may not actually be achievable - see
+  /// _planLegToMeetDeadline's doc comment.
+  final String? warning;
+
+  /// For PlannedTripTransportStore - see
+  /// TransportController.saveTransportPlan/getSavedTransportPlan, the
+  /// only callers. [option]/[to] round-trip through RideOption/
+  /// LocationPoint's own toJson/fromJson (already used by SavedTrip);
+  /// [visitStart]/[visitEnd] as ISO-8601 strings.
+  Map<String, dynamic> toJson() => {
+    'day': day,
+    'attractionName': attractionName,
+    'from': from.toJson(),
+    'to': to?.toJson(),
+    'option': option?.toJson(),
+    'visitStart': visitStart.toIso8601String(),
+    'visitEnd': visitEnd.toIso8601String(),
+    'warning': warning,
+  };
+
+  factory PlannedPlanLeg.fromJson(Map<String, dynamic> json) {
+    final rawTo = json['to'];
+    final rawOption = json['option'];
+    return PlannedPlanLeg(
+      day: (json['day'] as num?)?.toInt() ?? 1,
+      attractionName: json['attractionName'] as String? ?? '',
+      from: LocationPoint.fromJson(
+        Map<String, dynamic>.from(json['from'] as Map),
+      ),
+      to: rawTo is Map
+          ? LocationPoint.fromJson(Map<String, dynamic>.from(rawTo))
+          : null,
+      option: rawOption is Map
+          ? RideOption.fromJson(Map<String, dynamic>.from(rawOption))
+          : null,
+      visitStart: DateTime.parse(json['visitStart'] as String),
+      visitEnd: DateTime.parse(json['visitEnd'] as String),
+      warning: json['warning'] as String?,
+    );
+  }
+}
+
+/// A real option found for one [PlannedPlanLeg], and whether it actually
+/// meets that leg's deadline - see
+/// TransportController._planLegToMeetDeadline, the only place this is
+/// built.
+class _LegProbeResult {
+  const _LegProbeResult({this.option, this.warning});
+
+  final RideOption? option;
+  final String? warning;
 }

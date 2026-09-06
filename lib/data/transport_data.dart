@@ -455,6 +455,19 @@ const kLongWalkThresholdKm = 0.6;
 /// wherever it was added from.
 const kRainBikeTag = 'Rain - Ride Carefully';
 
+/// Shown as a warning-styled chip (see [kRainBikeTag]'s own doc comment
+/// on how MiniChip recognizes a warning tag) on a genuinely all-walking
+/// RideOption whose real walk still exceeds [kMaxWalkLegMinutes] - see
+/// TransportService._tagIfWalkOnlyLong for why this is tagged rather
+/// than dropped (there's no shorter-walk alternative to prefer instead,
+/// so hiding it would just mean showing nothing at all), and
+/// TransportService._hasExcessiveWalk for the case that IS dropped (a
+/// long walk mixed into an otherwise real bus/train/taxi/bike route,
+/// where a shorter-walk alternative might exist). Kept as one shared
+/// constant, not a literal string, for the same reason as
+/// [kRainBikeTag].
+const kWalkOnlyLongTag = 'Walk Only - No Other Route Found';
+
 /// Per-km rate used only for modes that genuinely *are* priced roughly
 /// per km in real life (a taxi/e-hailing fare, a bike-share's per-minute
 /// charge folded into a per-km equivalent) - see [estimateFareRm] for
@@ -485,6 +498,100 @@ bool isPenangArea(LocationPoint point) {
       point.lat <= 5.60 &&
       point.lng >= 100.10 &&
       point.lng <= 100.55;
+}
+
+/// Rough real-world bounding boxes for Malaysia - Peninsular Malaysia
+/// and East Malaysia (Sabah/Sarawak, on Borneo) don't sit inside one
+/// neat rectangle together, so this checks both separately - the same
+/// simple "good enough for this app's purposes" bounding-box approach
+/// [isPenangArea] already uses above, rather than a real
+/// country-boundary lookup (this app has no such data/API for it).
+/// Used to gate the whole transportation module to Malaysia (see
+/// RideHomePage._detectFromLocation) - this app only has real transit
+/// data for Malaysia's own operators, so a detected location genuinely
+/// outside both boxes below has nothing real to search for at all.
+///
+/// Like [isPenangArea], a rectangle this coarse can't perfectly exclude
+/// a different country that happens to sit right alongside Malaysia's
+/// own borders (Singapore, for one, falls inside the Peninsular box) -
+/// an accepted tradeoff for staying this simple, since the practical
+/// goal is only ever "clearly not Malaysia", which this still catches
+/// reliably (e.g. anywhere outside Southeast Asia entirely).
+bool isInMalaysia(LocationPoint point) {
+  final peninsularMalaysia =
+      point.lat >= 0.85 &&
+      point.lat <= 6.85 &&
+      point.lng >= 99.5 &&
+      point.lng <= 104.6;
+  final eastMalaysia =
+      point.lat >= 0.75 &&
+      point.lat <= 7.5 &&
+      point.lng >= 109.4 &&
+      point.lng <= 119.3;
+  return peninsularMalaysia || eastMalaysia;
+}
+
+/// The longest a single real walking leg is allowed to be before
+/// [TransportService] excludes the whole option it belongs to (see
+/// TransportService._hasExcessiveWalk) - a live HERE result can
+/// genuinely have a person walk 20+ minutes just to reach the nearest
+/// bus stop it picked, which is real data but not a walk most people
+/// would actually want as part of "take the bus", so an option like
+/// that is dropped in favour of a shorter-walk alternative when one
+/// exists (or an honest "no route found" when it doesn't) rather than
+/// shown as-is. Only applies to a walk leg inside an otherwise
+/// non-walking route - a trip that's genuinely all walking (no bus/
+/// train/taxi/bike leg to prefer instead) is left alone, same
+/// "coarse but documented" spirit as isPenangArea/isInMalaysia above.
+const kMaxWalkLegMinutes = 12;
+
+/// Malaysia's own fixed offset from UTC (MYT) - the country has used a
+/// single time zone with no daylight saving since 1982, so unlike
+/// almost anywhere else a constant offset is safe here, same "real but
+/// simple" tradeoff as isPenangArea/isInMalaysia above. Only meaningful
+/// alongside [malaysiaWallClockToInstant]/[instantToMalaysiaWallClock].
+const kMalaysiaUtcOffset = Duration(hours: 8);
+
+/// Reinterprets [wallClock]'s own year/month/day/hour/minute/second as
+/// Malaysia's local wall-clock time and returns the real absolute
+/// instant that represents - regardless of what timezone the device
+/// actually happens to be set to. Needed because this module builds
+/// values like "9am on this trip day" via the plain `DateTime(...)`
+/// constructor (see TransportController.planTransportationForPlan's
+/// `freeFrom`/`dayDate`), which Dart ties to the DEVICE's own
+/// timezone, not Malaysia's. A device not set to Malaysia time (a
+/// developer's own PC, a traveller's phone that hasn't updated its
+/// clock) would otherwise have this module silently ask HERE for
+/// transport at the wrong real moment entirely - and HERE would
+/// honestly answer with whatever real service actually runs at THAT
+/// wrong moment, which is exactly how a "Visit 10:04am" ends up next
+/// to a real bus that "Departs 10:14pm": the request itself asked for
+/// the wrong instant, not a display bug. Used by HereTransitService
+/// right before every live request; see [instantToMalaysiaWallClock]
+/// for the matching fix on the way back.
+DateTime malaysiaWallClockToInstant(DateTime wallClock) {
+  return DateTime.utc(
+    wallClock.year,
+    wallClock.month,
+    wallClock.day,
+    wallClock.hour,
+    wallClock.minute,
+    wallClock.second,
+  ).subtract(kMalaysiaUtcOffset);
+}
+
+/// The inverse of [malaysiaWallClockToInstant] - takes a real absolute
+/// instant (e.g. a live HERE result's own departure/arrival time,
+/// which correctly represents a real moment no matter how its own
+/// year/month/day/hour fields happen to be expressed) and returns a
+/// DateTime whose year/month/day/hour/minute/second are Malaysia's own
+/// wall-clock numbers for that instant - so this module's existing
+/// "just compare/format the fields directly" code (deadlines, visit
+/// windows, RideCard's own time labels, ...) keeps working exactly as
+/// before, only now those fields actually mean Malaysia time instead
+/// of whatever the device's own timezone happens to be.
+DateTime instantToMalaysiaWallClock(DateTime instant) {
+  return instant.toUtc().add(kMalaysiaUtcOffset);
 }
 
 /// Real fare structures for the scheduled-service modes this app models,

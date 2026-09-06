@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_navigation_flutter/google_navigation_flutter.dart';
+import 'package:http/http.dart' as http;
 
 import '../core/app_theme.dart';
 import '../models/location_point.dart';
@@ -77,6 +78,14 @@ class _NavigationPageState extends State<NavigationPage> {
   // Drives whether the error banner below offers "Retry" (which would
   // just reproduce the identical failure, forever) or "Back" instead.
   bool _errorRecoverable = true;
+  // True only for the "granted, but Android's separate precise-location
+  // toggle is off" case below - the one error _initialize() can hit
+  // that a plain "Retry" can never fix (Android only re-shows that
+  // toggle on a fresh permission grant, not on a repeat
+  // Geolocator.requestPermission() call once it's already "granted" at
+  // reduced accuracy), so the error banner offers "Open Settings"
+  // instead - see the actionLabel/onAction wiring in build().
+  bool _needsSettingsAction = false;
   String? _segmentNotice;
 
   // Auto-clears _segmentNotice a few seconds after it's shown (see
@@ -119,6 +128,35 @@ class _NavigationPageState extends State<NavigationPage> {
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
         _setError('Precise location permission is required for navigation.');
+        return;
+      }
+
+      // Geolocator's own permission check above only confirms location
+      // access was granted AT ALL - on Android 12+ (and iOS's own
+      // "Precise Location" toggle), a person can grant that and still
+      // choose "Approximate" rather than "Precise", which Geolocator
+      // reports as fully granted (this app never sees a "denied") but
+      // Google Navigation SDK's own stricter internal check rejects
+      // outright, throwing exactly the
+      // SessionInitializationError.locationPermissionMissing this
+      // method used to let straight through to the catch block below
+      // as a bare "could not start" - accurate about WHAT failed, not
+      // WHY, so there was nothing telling the person there's a second,
+      // separate toggle to go find. Checking it explicitly here lets
+      // this say so plainly, with a real path to fix it (Android/iOS
+      // only offer that Precise/Approximate choice at the moment
+      // permission is first granted, not on a repeat
+      // requestPermission() call once it's already "granted" - so
+      // sending the person to Settings, not retrying, is the only way
+      // out of this specific state).
+      final accuracy = await Geolocator.getLocationAccuracy();
+      if (accuracy == LocationAccuracyStatus.reduced) {
+        _setError(
+          'Google Navigation needs Precise Location, but this app only '
+          'has Approximate Location. Turn on "Use precise location" for '
+          'this app in your device Settings, then come back.',
+          needsSettings: true,
+        );
         return;
       }
 
@@ -254,7 +292,11 @@ class _NavigationPageState extends State<NavigationPage> {
       }
 
       if (status != NavigationRouteStatus.statusOk) {
-        _setError(_messageForStatus(status, leg.travelMode));
+        _setError(
+          status == NavigationRouteStatus.networkError
+              ? await _networkErrorMessage()
+              : _messageForStatus(status, leg.travelMode),
+        );
         return;
       }
 
@@ -296,11 +338,51 @@ class _NavigationPageState extends State<NavigationPage> {
     };
   }
 
-  void _setError(String message, {bool recoverable = true}) {
+  /// [NavigationRouteStatus.networkError] only means Google Navigation's
+  /// OWN native routing call couldn't reach Google's backend - it says
+  /// nothing about why, and a phone showing data/Wi-Fi as "on" is not
+  /// proof it has real, working internet (a Wi-Fi captive portal still
+  /// needing a login page, a data plan throttled to near-zero after
+  /// running out, or a network that simply can't reach Google's own
+  /// servers all still show a normal signal icon - see the person's own
+  /// report of hitting this with data visibly on). Probing a real,
+  /// always-up Google endpoint here - deliberately separate from
+  /// anything this app's own HERE integration touches, so a HERE outage
+  /// can never make this diagnosis lie - tells them which of two very
+  /// different problems this actually is: no working connection at all,
+  /// or a working connection that still can't reach Google specifically
+  /// (both need a different fix on their end, and "just press Retry"
+  /// can't resolve either).
+  Future<String> _networkErrorMessage() async {
+    try {
+      final response = await http
+          .get(Uri.parse('https://www.gstatic.com/generate_204'))
+          .timeout(const Duration(seconds: 5));
+      if (response.statusCode == 204 || response.statusCode == 200) {
+        return 'Your phone does have internet, but Google Navigation still '
+            "could not reach Google's map servers. Try switching between "
+            'Wi-Fi and mobile data (this network may be blocking Google '
+            'services), then retry.';
+      }
+    } catch (_) {
+      // Falls through to the "no real connection" message below.
+    }
+    return "Your phone doesn't appear to have a working internet "
+        'connection right now, even if data or Wi-Fi looks turned on. '
+        'Try toggling Airplane Mode, switching networks, or restarting '
+        'your connection, then retry.';
+  }
+
+  void _setError(
+    String message, {
+    bool recoverable = true,
+    bool needsSettings = false,
+  }) {
     if (!mounted) return;
     setState(() {
       _error = message;
       _errorRecoverable = recoverable;
+      _needsSettingsAction = needsSettings;
       _startingGuidance = false;
     });
   }
@@ -407,10 +489,14 @@ class _NavigationPageState extends State<NavigationPage> {
                   // "Back" button (leaves this screen entirely) instead.
                   actionLabel: !_errorRecoverable
                       ? 'Back'
-                      : (_sessionInitialized ? 'Retry' : null),
+                      : (_needsSettingsAction
+                            ? 'Open Settings'
+                            : (_sessionInitialized ? 'Retry' : null)),
                   onAction: !_errorRecoverable
                       ? _close
-                      : (_sessionInitialized ? _startGuidance : null),
+                      : (_needsSettingsAction
+                            ? () => Geolocator.openAppSettings()
+                            : (_sessionInitialized ? _startGuidance : null)),
                 ),
               ),
             if (_startingGuidance)
