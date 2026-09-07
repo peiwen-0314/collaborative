@@ -366,7 +366,6 @@ class HeritageStorageService {
   }
 
   Future<void> _prepareDiary() async {
-    await _migrateLocalDiaryIfNeeded();
     await _migrateLegacyFirestoreDocumentsIfNeeded();
   }
 
