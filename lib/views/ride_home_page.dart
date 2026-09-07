@@ -20,6 +20,7 @@ import 'trip_details_page.dart';
 import 'trip_plans_page.dart';
 import 'ai_trip_planner_page.dart';
 import 'home_page.dart';
+import 'community_feed_page.dart';
 import 'profile_page.dart';
 
 class TransportationPage extends StatefulWidget {
@@ -409,6 +410,15 @@ class _TransportationPageState extends State<TransportationPage> {
     );
   }
 
+  void _goCommunity() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const CommunityFeedPage(),
+      ),
+    );
+  }
+
   void _showComingSoon(String page) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -583,9 +593,7 @@ class _TransportationPageState extends State<TransportationPage> {
           // Already on Transportation page.
         },
         onPlanTripTap: _goPlanTrip,
-        onCommunityTap: () {
-          _showComingSoon('Community');
-        },
+        onCommunityTap: _goCommunity,
         onProfileTap: () {
           Navigator.push(
             context,

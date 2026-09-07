@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'admin_moderation_page.dart';
+
 class AdminSidebar extends StatelessWidget {
   const AdminSidebar({
     super.key,
@@ -11,6 +13,7 @@ class AdminSidebar extends StatelessWidget {
     required this.onStampTap,
     required this.onReportTap,
     required this.onLogoutTap,
+    this.onModerationTap,
   });
 
   final String selectedPage;
@@ -22,6 +25,7 @@ class AdminSidebar extends StatelessWidget {
   final VoidCallback onStampTap;
   final VoidCallback onReportTap;
   final VoidCallback onLogoutTap;
+  final VoidCallback? onModerationTap;
 
   static const Color mainGreen = Color(0xFF2E7D32);
 
@@ -87,6 +91,21 @@ class AdminSidebar extends StatelessWidget {
             title: 'Categories Management',
             selected: selectedPage == 'category',
             onTap: onCategoryTap,
+          ),
+
+          sidebarItem(
+            icon: Icons.shield_outlined,
+            title: 'Content Moderation',
+            selected: selectedPage == 'moderation',
+            onTap: onModerationTap ??
+                () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AdminModerationPage(),
+                    ),
+                  );
+                },
           ),
 
           // =====================================================

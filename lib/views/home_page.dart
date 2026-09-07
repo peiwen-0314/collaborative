@@ -13,6 +13,7 @@ import 'ai_trip_planner_page.dart';
 import 'attraction_detail_page.dart';
 import 'attraction_search_page.dart';
 import 'cultural_heritage_page.dart';
+import 'community_feed_page.dart';
 import 'heritage_detail_page.dart';
 import 'profile_page.dart';
 import 'ride_home_page.dart';
@@ -548,6 +549,17 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  void _openCommunity() {
+    if (widget.onCommunityTap != null) {
+      widget.onCommunityTap!();
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const CommunityFeedPage()),
+    );
+  }
+
   @override
   void dispose() {
     _controller.removeListener(
@@ -655,7 +667,7 @@ class _HomePageState extends State<HomePage> {
 
         onPlanTripTap: _openAiTripPlanner,
 
-        onCommunityTap: widget.onCommunityTap,
+        onCommunityTap: _openCommunity,
 
         onProfileTap: widget.onProfileTap ?? _openProfile,
       ),
