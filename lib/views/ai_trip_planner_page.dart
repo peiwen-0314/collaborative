@@ -4,6 +4,7 @@ import '../controllers/ai_trip_planner_controller.dart';
 import '../widgets/eco_bottom_navigation.dart';
 
 import 'generated_trip_page.dart';
+import 'community_feed_page.dart';
 import 'home_page.dart';
 import 'ride_home_page.dart';
 import 'trip_location_date_page.dart';
@@ -104,6 +105,13 @@ class _AiTripPlannerPageState extends State<AiTripPlannerPage> {
       MaterialPageRoute(
         builder: (_) => const TransportationPage(),
       ),
+    );
+  }
+
+  void _goCommunity() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const CommunityFeedPage()),
     );
   }
 
@@ -221,9 +229,7 @@ class _AiTripPlannerPageState extends State<AiTripPlannerPage> {
         onPlanTripTap: () {
           // Already on AI Trip Planner page.
         },
-        onCommunityTap: () {
-          _showComingSoon('Community');
-        },
+        onCommunityTap: _goCommunity,
         onProfileTap: () {
           _showComingSoon('Profile');
         },
