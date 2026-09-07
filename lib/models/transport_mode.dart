@@ -27,9 +27,6 @@ extension TransportModeX on TransportMode {
     }
   }
 
-  /// Bundled image asset for this mode, if one exists in [AppAssets].
-  /// Modes without a bundled image (walk/taxi/mrt/bike/other) fall back to
-  /// a Material icon via [icon].
   String? get assetPath {
     switch (this) {
       case TransportMode.train:
@@ -68,9 +65,27 @@ extension TransportModeX on TransportMode {
     }
   }
 
-  /// Best-effort mapping from a HERE API `transport.mode` string
-  /// (see https://www.here.com/docs/bundle/public-transit-api-developer-guide-v8)
-  /// to our internal enum.
+  Color get routeColor {
+    switch (this) {
+      case TransportMode.train:
+        return const Color(0xFF6A4C93);
+      case TransportMode.mrt:
+        return const Color(0xFF1E88E5);
+      case TransportMode.bus:
+        return const Color(0xFF2E7D32);
+      case TransportMode.ferry:
+        return const Color(0xFF00838F);
+      case TransportMode.walk:
+        return const Color(0xFFE53935);
+      case TransportMode.taxi:
+        return const Color(0xFFE07D21);
+      case TransportMode.bike:
+        return const Color(0xFF00ACC1);
+      case TransportMode.other:
+        return const Color(0xFF9E9E9E);
+    }
+  }
+
   static TransportMode fromHereMode(String? mode) {
     switch (mode) {
       case 'highSpeedTrain':
@@ -94,20 +109,9 @@ extension TransportModeX on TransportMode {
       case 'walk':
         return TransportMode.walk;
       case 'taxi':
-      // What HERE's standard Routing API v8 uses for a driving/car leg
-      // (see HereTransitService.searchDrive) - this app has no separate
-      // "private car" category, so it's folded into the same taxi/
-      // e-hailing bucket used everywhere else (same cost/CO2-per-km
-      // assumptions, same "Taxi" label/icon).
       case 'car':
         return TransportMode.taxi;
       case 'bicycle':
-        // What HERE's Intermodal Routing API uses for a shared-bike leg
-        // (paired with section type "rented" - see
-        // HereTransitService.searchIntermodal). A plain "bicycle" mode
-        // without that section type shouldn't normally appear from the
-        // endpoints this app calls, but mapping it here regardless is
-        // harmless and more correct than falling through to "other".
         return TransportMode.bike;
       default:
         return TransportMode.other;

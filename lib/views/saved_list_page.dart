@@ -23,30 +23,15 @@ class _SavedListPageState extends State<SavedListPage> {
   List<SavedTrip>? _trips;
   String? _error;
 
-  /// Best-effort only (see _loadCurrentLocation) - null just means the
-  /// Saved List falls back to its default order (by first appearance)
-  /// instead of nearest-first. Never something that blocks or errors
-  /// the page - a person's saved trips are still the point of this
-  /// screen even when their current position can't be read.
   LocationPoint? _currentLocation;
 
   @override
   void initState() {
     super.initState();
-    // Rain check only runs once the initial load has actually finished
-    // (not chained onto every subsequent _load(), e.g. after returning
-    // from a trip's details page - re-prompting about the same rain on
-    // every navigation back to this page would get old fast; "every
-    // time the page is opened" means this initState, not every reload).
     _load().then((_) => _checkRainAndPrompt());
     _loadCurrentLocation();
   }
 
-  /// Fetches the person's current position purely to sort saved trips by
-  /// real proximity to it (see groupSavedTrips) - deliberately separate
-  /// from _load so a slow/denied/failed location fix never delays or
-  /// blocks showing the saved trips themselves; it just means the list
-  /// stays in its default order until this resolves, if it ever does.
   Future<void> _loadCurrentLocation() async {
     final result = await _locationService.detectCurrentLocation();
     if (!mounted || result.point == null) return;
@@ -54,13 +39,6 @@ class _SavedListPageState extends State<SavedListPage> {
   }
 
   Future<void> _load() async {
-    // No setState before the first `await` here on purpose - this runs
-    // synchronously from initState the first time, and calling
-    // setState() on that same call stack (i.e. before Flutter's first
-    // build for this page has happened) throws. _error only gets
-    // cleared as part of the same setState as a successful `_trips`
-    // update below, so a Retry after a failure still clears the old
-    // error message once it succeeds.
     try {
       final trips = await _controller.getSavedTrips();
       if (!mounted) return;
@@ -69,11 +47,6 @@ class _SavedListPageState extends State<SavedListPage> {
         _error = null;
       });
     } catch (error) {
-      // Without this, a failure here (no signed-in user, a missing
-      // Firestore rule, no network...) left the page spinning forever
-      // instead of saying why - showing the real error is what makes
-      // "my saved trips aren't showing up" diagnosable from the app
-      // itself instead of guessing.
       if (!mounted) return;
       setState(() => _error = error.toString());
     }
@@ -94,18 +67,10 @@ class _SavedListPageState extends State<SavedListPage> {
           content: Text('Could not remove trip: $error'),
         ),
       );
-      // The Dismissible already animated itself away optimistically -
-      // reload from Firestore so the list reflects what's actually
-      // saved there instead of staying out of sync.
       _load();
     }
   }
 
-  /// Best-effort rain check across every saved trip with a real bike
-  /// leg (see TransportController.checkSavedTripsForRain), then prompts
-  /// about each rainy one in turn - one dialog at a time, not all at
-  /// once, so a person with several rainy saved bike trips isn't hit
-  /// with a stack of overlapping dialogs.
   Future<void> _checkRainAndPrompt() async {
     final trips = _trips;
     if (trips == null || trips.isEmpty || !mounted) return;
@@ -120,10 +85,6 @@ class _SavedListPageState extends State<SavedListPage> {
 
     for (final alert in alerts) {
       if (!mounted) return;
-      // The trip this alert was computed for may have been removed
-      // (swiped away) while an earlier alert in this same batch was
-      // still being decided - skip it rather than prompting about
-      // something no longer in the list.
       if (!(_trips?.any((t) => t.id == alert.trip.id) ?? false)) continue;
 
       final wantsSwap = await showDialog<bool>(
@@ -192,12 +153,10 @@ class _SavedListPageState extends State<SavedListPage> {
               from: trip.from,
               to: trip.to,
               option: trip.option,
-              // Opened from the Saved List specifically - see
-              // TripDetailsPage.allowTimeChange's doc comment for why
-              // this differs from opening straight out of a fresh
-              // search (ride_home_page.dart's _openDetails), which
-              // leaves this false.
               allowTimeChange: true,
+              // See TripDetailsPage.isSavedTrip's doc comment - hides
+              // the "Wait ..." text here too, matching the card above.
+              isSavedTrip: true,
             ),
           ),
         )
@@ -274,13 +233,6 @@ class _SavedListPageState extends State<SavedListPage> {
       );
     }
 
-    // One from/to header per real journey (see groupSavedTrips) - three
-    // different route combinations bookmarked for the same journey used
-    // to repeat "Well Mart Enterprise -> Jelutong" three times; now it's
-    // one header with all three RideCards listed under it. Sorted
-    // nearest-to-_currentLocation-first when that's known, so a saved
-    // trip actually near the person right now surfaces before ones
-    // saved from somewhere else entirely.
     final groups = groupSavedTrips(trips, currentLocation: _currentLocation);
 
     return ListView.separated(
@@ -294,11 +246,15 @@ class _SavedListPageState extends State<SavedListPage> {
           children: [
             Padding(
               padding: const EdgeInsets.only(left: 8, bottom: 7),
-              child: Text(
-                '${shortPlaceName(group.from.name)}  →  ${shortPlaceName(group.to.name)}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              child: Tooltip(
+                message: '${group.from.name}  →  ${group.to.name}',
+                waitDuration: const Duration(milliseconds: 400),
+                child: Text(
+                  '${shortPlaceName(group.from.name)}  →  ${shortPlaceName(group.to.name)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                ),
               ),
             ),
             for (final trip in group.trips) ...[
@@ -306,11 +262,6 @@ class _SavedListPageState extends State<SavedListPage> {
                 key: ValueKey(trip.id),
                 direction: DismissDirection.endToStart,
                 onDismissed: (_) => _remove(trip),
-                // No top-offset margin needed here (unlike the old
-                // header+card Dismissible) - this one wraps just the
-                // RideCard itself now that the header sits outside it,
-                // shared by the whole group, so the swipe background can
-                // simply match the card's own bounds directly.
                 background: Container(
                   alignment: Alignment.centerRight,
                   padding: const EdgeInsets.only(right: 18),
@@ -323,7 +274,11 @@ class _SavedListPageState extends State<SavedListPage> {
                     color: Colors.redAccent,
                   ),
                 ),
-                child: RideCard(option: trip.option, onTap: () => _openTrip(trip)),
+                child: RideCard(
+                  option: trip.option,
+                  onTap: () => _openTrip(trip),
+                  showWaitWarning: false,
+                ),
               ),
               if (trip != group.trips.last) const SizedBox(height: 10),
             ],

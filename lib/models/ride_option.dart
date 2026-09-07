@@ -25,41 +25,15 @@ class RideOption {
   final double estCostRm;
   final double co2Kg;
 
-  /// The `departAt` time the *search itself* was made for - not this
-  /// option's own first-leg start time (that's [departTime] below). A real
-  /// scheduled service (a bus, a train) can genuinely not run again for
-  /// hours after you search, and HERE correctly reports that real
-  /// departure time - but comparing options purely by [totalDuration]
-  /// (which only measures this option's own timeline, ignoring how far in
-  /// the future it starts) makes an infrequent service that won't leave
-  /// for hours look deceptively as fast as something you could start
-  /// walking on right now. [waitBeforeDeparture] and
-  /// [totalElapsedFromSearch] below exist to make that comparison fair.
   final DateTime searchDepartAt;
 
   /// Qualitative badges such as "Low Carbon", "Cost Effective", "On Time".
   final List<String> tags;
 
-  /// Whether this option came from the live HERE API (true) or from the
-  /// offline mock/cache fallback (false). Surfaced in the UI as a small
-  /// "Live" / "Demo data" hint.
   final bool isLiveData;
 
-  /// The real road/rail geometry for this route, decoded from HERE's
-  /// response - empty for offline/mock options (there's no real geometry
-  /// to follow for a fabricated demo trip) or if decoding the live
-  /// response's polyline failed. The navigation map falls back to a
-  /// straight line between the origin and destination whenever this is
-  /// empty.
   final List<LocationPoint> path;
 
-  /// A rough, explicitly-labelled ESTIMATE of a possible bus delay (rain
-  /// and/or peak-hour road traffic) - see DelayEstimate's own doc
-  /// comment for why this is never presented as live tracking. Null for
-  /// an option with no scheduled bus leg, or one where neither risk
-  /// factor was present at search time - see
-  /// TransportController.searchRides, which is the only place that ever
-  /// sets this.
   final DelayEstimate? delayEstimate;
 
   DateTime get departTime => legs.first.start;
@@ -68,39 +42,13 @@ class RideOption {
 
   Duration get totalDuration => arriveTime.difference(departTime);
 
-  /// How long after the search was actually made this option's own
-  /// itinerary starts. Zero for the normal case (this option's first leg
-  /// starts at or before the search time); positive only for a real
-  /// scheduled service whose next real departure is genuinely later than
-  /// "now" - e.g. an infrequent bus route searched outside its busy hours.
   Duration get waitBeforeDeparture {
     final diff = departTime.difference(searchDepartAt);
     return diff.isNegative ? Duration.zero : diff;
   }
 
-  /// The fair, apples-to-apples number for comparing options against each
-  /// other: total time from when the search was actually made until
-  /// arrival, wait-for-the-next-departure included - not just the ride
-  /// itself. This is what ranking/sorting and the UI's duration display
-  /// should use instead of [totalDuration] alone, which can make an
-  /// infrequent service that won't leave for hours look deceptively
-  /// competitive with an option you could start on right now.
   Duration get totalElapsedFromSearch => arriveTime.difference(searchDepartAt);
 
-  /// How many times this option's rider actually changes vehicles.
-  ///
-  /// Not simply `legs.where((leg) => leg.isTransfer).length`: that flag
-  /// also covers filler "Wait for ..." segments inserted before *each*
-  /// real leg (including the very first one - see
-  /// MockTransportRepository/HereTransitService), so counting it
-  /// directly conflates "waiting for a bus" with "changing buses", and
-  /// can even miss a real transfer entirely when the provider didn't
-  /// return a walking/interchange leg between two consecutive vehicles
-  /// (e.g. a same-stop change - see TripDetailsPage's itinerary, which
-  /// shows a synthetic "Change here" marker in that case). This instead
-  /// counts the real (non-walk) transit legs and subtracts one: two bus
-  /// legs joined by one change of vehicle correctly reads as 1, a
-  /// single direct leg as 0.
   int get transferCount {
     final transitLegCount = legs
         .where((leg) => !leg.isTransfer && leg.mode != TransportMode.walk)
@@ -108,27 +56,6 @@ class RideOption {
     return transitLegCount > 0 ? transitLegCount - 1 : 0;
   }
 
-  /// A concrete label for the results list card - keeps [title]'s
-  /// generic mode grouping ("Bus", "Bus + Train") exactly as-is, but
-  /// appends the real route/service number of each vehicle actually
-  /// ridden in parentheses, e.g. "Bus (104 + 101)" - so near-identical
-  /// "Bus" options (which used to be indistinguishable on the results
-  /// list) are still told apart, without losing the familiar mode word.
-  /// Only live options have a real service name per leg (see
-  /// HereTransitService._parseRoute's `serviceName`) - the offline/mock
-  /// generator has no real bus/train numbers to show, so this falls
-  /// back to plain [title] for those, and for any live leg HERE itself
-  /// couldn't give a more specific name than the generic mode label.
-  ///
-  /// Only appended at all when every real leg rides the SAME mode (see
-  /// [_realModes]) - that's when the extra numbers actually help tell
-  /// two "Bus" options apart. Once a trip genuinely mixes modes (Bus +
-  /// Train + MRT), [title] already says as much on its own; piling every
-  /// one of those services' own real numbers on top ("Bus + Train + MRT
-  /// (709 + 802 + ETS + KJL)") just makes an already multi-word title
-  /// far too long to read at a glance for not much extra information -
-  /// every real service name is still there leg-by-leg once the trip's
-  /// own detail page is open.
   String get routeSummary {
     if (!isLiveData || _realModes.length > 1) return title;
     final realLabels = <String>[];
@@ -136,10 +63,6 @@ class RideOption {
       if (leg.isTransfer || leg.mode == TransportMode.walk) continue;
       final label = leg.title.trim();
       if (label.isEmpty || label == leg.mode.label) continue;
-      // Some titles already spell out their real numbers themselves
-      // (e.g. OsmBikeShareService/TransportService building "Bus (104 +
-      // 11) + Shared Bike" directly) - appending them again here would
-      // just repeat "(104)" a second time.
       if (title.contains(label)) continue;
       if (realLabels.isEmpty || realLabels.last != label) {
         realLabels.add(label);
@@ -148,19 +71,32 @@ class RideOption {
     return realLabels.isEmpty ? title : '$title (${realLabels.join(' + ')})';
   }
 
-  /// Every distinct real (non-transfer, non-walk) mode this option
-  /// actually rides - see [routeSummary]. A plain `Set` rather than a
-  /// count alone so it stays legible at the call site (`.length > 1`
-  /// reads as "genuinely mixed modes", not a magic number).
   Set<TransportMode> get _realModes => {
     for (final leg in legs)
       if (!leg.isTransfer && leg.mode != TransportMode.walk) leg.mode,
   };
 
+  double? get co2RatePerKm {
+    var totalKm = 0.0;
+    for (final leg in legs) {
+      final km = leg.distanceKm;
+      if (km != null) totalKm += km;
+    }
+    if (totalKm <= 0) return null;
+    return co2Kg / totalKm;
+  }
+
   String get co2Level {
-    if (co2Kg <= 0.2) return 'Very Low';
-    if (co2Kg <= 0.6) return 'Low';
-    if (co2Kg <= 1.5) return 'Medium';
+    final rate = co2RatePerKm;
+    if (rate == null) {
+      if (co2Kg <= 0.2) return 'Very Low';
+      if (co2Kg <= 0.6) return 'Low';
+      if (co2Kg <= 1.5) return 'Medium';
+      return 'High';
+    }
+    if (rate <= 0.03) return 'Very Low';
+    if (rate <= 0.07) return 'Low';
+    if (rate <= 0.12) return 'Medium';
     return 'High';
   }
 
@@ -192,11 +128,6 @@ class RideOption {
       path: (json['path'] as List? ?? const [])
           .map((p) => LocationPoint.fromJson(p as Map<String, dynamic>))
           .toList(),
-      // Falls back to this option's own first-leg start for a cache entry
-      // written before this field existed - that just means
-      // waitBeforeDeparture reads as zero for that one stale entry, never
-      // a crash. New searches (the cache key was bumped alongside this
-      // change) always have the real value.
       searchDepartAt: json['searchDepartAt'] != null
           ? DateTime.parse(json['searchDepartAt'] as String)
           : (legs.isNotEmpty ? legs.first.start : DateTime.now()),

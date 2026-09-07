@@ -7,25 +7,6 @@ import '../models/transport_mode.dart';
 import '../models/trip_leg.dart';
 import 'here_transit_service.dart';
 
-/// Asks HERE's real Public Transit API for a short point-to-point hop - an
-/// access/egress leg, e.g. from a rider's real origin to a bike-share
-/// station, or to the first usable bus stop for a route that otherwise
-/// starts with a long walk - and returns whatever real route HERE has for
-/// it, or null if there genuinely isn't one usable. Shared by
-/// OsmBikeShareService (first/last mile to a bike station) and
-/// TransportService (offering a "take a bus to the stop" alternative when
-/// a live transit option starts or ends with a long walk), so both use
-/// exactly the same real-data logic and caveats instead of two subtly
-/// different copies.
-///
-/// A hop that's slower than the plain walk it's being compared against is
-/// NOT discarded here - it's still a real, valid choice for someone who'd
-/// rather ride than walk; callers decide what to do with a slower hop
-/// (typically: offer it as a second, separate option rather than silently
-/// picking one for the rider - see OsmBikeShareService._buildOptions and
-/// TransportService._withAccessAlternatives). Only a genuinely unusable
-/// result (no route at all, or a broken/negative duration - see the
-/// comment below) returns null.
 Future<RideOption?> findTransitHop({
   required HereTransitService? here,
   required LocationPoint from,
@@ -51,15 +32,6 @@ Future<RideOption?> findTransitHop({
       (a, b) => a.totalElapsedFromSearch.compareTo(b.totalElapsedFromSearch),
     );
 
-    // Pick the soonest-arriving alternative whose schedule actually lines
-    // up with the requested [departAt] - a route whose reported arrival
-    // is before departAt (a negative totalElapsedFromSearch), or whose
-    // very first leg starts noticeably earlier than departAt, doesn't
-    // really correspond to when the rider would be there. Splicing a
-    // hop like that into a combined itinerary elsewhere previously
-    // produced a timeline that jumped backwards in time (seen in
-    // practice, for a real HERE response) - so rather than trying to
-    // salvage it, this skips straight to the next alternative.
     RideOption? best;
     for (final candidate in options) {
       if (candidate.legs.isEmpty) continue;
@@ -82,16 +54,6 @@ Future<RideOption?> findTransitHop({
       return null;
     }
 
-    // HERE's transit search can legitimately answer "just walk" - when
-    // there genuinely is no bus/train that covers this specific short
-    // hop, its best (sometimes only) alternative is a pure walking
-    // route. That's not a real transit alternative at all: spliced in
-    // by a caller, it used to show up as a *second*, near-identical
-    // option - same walk, same distance, just restyled from a plain
-    // green "Walk" box into a white "Transfer" box (and, confusingly, a
-    // different cost) - which read as two options that differ only by
-    // box color. So a hop with no real (non-walk) leg in it is treated
-    // exactly like "HERE found nothing", not like a usable alternative.
     final hasRealTransitLeg = best.legs.any(
       (leg) => leg.mode != TransportMode.walk,
     );
@@ -129,17 +91,6 @@ Future<RideOption?> findTransitHop({
   }
 }
 
-/// A hop's own boundary walk legs are computed by HERE relative to ITS
-/// OWN isolated sub-search (see HereTransitService._parseRoute), so its
-/// first and last walk legs are marked as a genuine start/end walk (not
-/// a mid-trip "Transfer"), matching the convention for a route that
-/// stands on its own. When a hop is spliced into the MIDDLE of a larger
-/// itinerary instead - not at the very start or very end of the whole
-/// trip - that boundary walk becomes a genuine transfer and needs
-/// restyling to match (see TimelineItem/_TimelineCard, which colors a
-/// leg white only when [TripLeg.isTransfer] is true). These two helpers
-/// do exactly that to one boundary leg, leaving every other leg (and
-/// any non-walk boundary leg) untouched.
 List<TripLeg> asLeadingSegment(List<TripLeg> legs) {
   if (legs.isEmpty) return legs;
   final last = legs.last;
@@ -180,17 +131,6 @@ List<TripLeg> asTrailingSegment(List<TripLeg> legs) {
   ];
 }
 
-/// Collapses any run of two or more back-to-back walk legs into one
-/// walk leg spanning the whole run. Splicing a real hop's own boundary
-/// walk (see asLeadingSegment/asTrailingSegment) can otherwise land it
-/// directly next to a walk leg that was already there - e.g. editing
-/// one leg of a trip whose neighbour is itself a spliced-in boundary
-/// walk from an earlier automatic hop - which shows up as two separate
-/// "Walk" boxes back to back for what is really just one continuous
-/// walk. Called after every splice that can create this situation
-/// (OsmBikeShareService._composeOption, TransportService.
-/// _withAccessAlternatives, withLegReplaced below) rather than only
-/// where it was first noticed, since any of them can produce it.
 List<TripLeg> mergeAdjacentWalkLegs(List<TripLeg> legs) {
   if (legs.length < 2) return legs;
   final merged = <TripLeg>[];
@@ -220,30 +160,10 @@ List<TripLeg> mergeAdjacentWalkLegs(List<TripLeg> legs) {
   return merged;
 }
 
-/// A boundary walk leg being restyled to isTransfer:true (see
-/// asLeadingSegment/asTrailingSegment above) still carries whatever
-/// access/egress-style subtitle it was given as a standalone leg (e.g.
-/// "⇄  Walk") - left alone, the text would say "Walk" while the box
-/// renders white/"Transfer", which is exactly the text-vs-styling
-/// mismatch these two functions exist to fix in the first place. Only
-/// swaps a recognized "⇄  ..." walk subtitle; anything else (a
-/// mid-route walk that was already "⇄  Transfer", or an unexpected
-/// string) is left as-is rather than guessed at.
 String _asTransferSubtitle(String subtitle) {
   return subtitle.startsWith('⇄') ? '⇄  Transfer' : subtitle;
 }
 
-/// The one real service/route label [leg] itself rides (e.g. "104"),
-/// or null when it has none of its own to match on - a walk/transfer
-/// leg, or a leg HERE (or the offline/mock generator) couldn't give a
-/// more specific name than its own generic mode label. The single-leg
-/// building block [hopRouteLabels] applies across a whole hop's legs;
-/// TripDetailsPage's per-leg schedule re-check (_changeDepartureTime)
-/// uses it directly to check one real leg at a time against a fresh
-/// [TransportController.findLegAlternatives] result for that exact
-/// stretch, rather than trying to match a whole multi-transfer trip as
-/// one unit (see withLegsReplaced's doc comment for why that whole-trip
-/// matching turned out to be unreliable).
 String? realLegLabel(TripLeg leg) {
   if (leg.isTransfer || leg.mode == TransportMode.walk) return null;
   final label = leg.title.trim();
@@ -251,13 +171,6 @@ String? realLegLabel(TripLeg leg) {
   return label;
 }
 
-/// The real route/service numbers a hop actually rides (e.g. ["104"]),
-/// in leg order - just [realLegLabel] applied leg-by-leg and
-/// de-duplicated, exposed here so callers that splice a hop into a
-/// combined itinerary (OsmBikeShareService._composeOption,
-/// TransportService._withAccessAlternatives) can group these into one
-/// "Bus (104 + 11)"-style title segment instead of a separate "Bus"
-/// word per hop, which used to read as "Bus + Shared Bike + Bus".
 List<String> hopRouteLabels(RideOption hop) {
   final labels = <String>[];
   for (final leg in hop.legs) {
@@ -267,38 +180,6 @@ List<String> hopRouteLabels(RideOption hop) {
   return labels;
 }
 
-
-/// Rebuilds [option] with the single leg at [legIndex] swapped for
-/// [replacement]'s own real legs - the manual counterpart to
-/// findTransitHop/_withAccessAlternatives above: instead of the app
-/// silently picking the best real alternative for a long access/egress
-/// walk, this lets a person pick ANY leg (not just a boundary walk) and
-/// choose from every real alternative HERE has for that exact stretch
-/// (see TransportService.findLegAlternatives) - e.g. swapping a "walk 29
-/// min to catch the 101" leg for a real "104" bus instead, because
-/// that's what they'd rather do, not because one is objectively faster.
-///
-/// Everything before [legIndex] keeps its own real absolute times
-/// untouched. Everything after it shifts by however much the
-/// replacement's own end time differs from the original leg's end time -
-/// a slower replacement pushes the rest of the trip later, a faster one
-/// pulls it earlier, exactly like swapping one leg of a real journey
-/// planner's itinerary would.
-/// Moves [option]'s whole itinerary to a new departure time WITHOUT
-/// re-searching - every leg keeps its real mode/title/subtitle/distance
-/// (see TripLeg.distanceKm), just shifted by [delta], and cost/CO2/tags
-/// carry over unchanged too. Used by TripDetailsPage._changeDepartureTime
-/// for a Saved List trip: the point of "change the time" there is
-/// re-dating the exact same day-to-day commute, not risking a fresh
-/// search coming back with a genuinely different combination of real
-/// alternatives for the new date/time (which withLegReplaced-style
-/// editing already covers on purpose, for a person who explicitly wants
-/// to swap one leg). The tradeoff: unlike every other time shown in this
-/// app, the shifted times are NOT re-confirmed against a real schedule
-/// for the new date - see the "Live" tag TripDetailsPage's header
-/// already shows to mean "these times came from a real search", which a
-/// shifted option keeps carrying even though this particular result
-/// didn't just come from one.
 RideOption withTimeShifted(RideOption option, Duration delta) {
   if (delta == Duration.zero) return option;
   final shiftedLegs = option.legs
@@ -343,12 +224,6 @@ RideOption withLegReplaced(
   final isFirstOverall = legIndex == 0;
   final isLastOverall = legIndex == legs.length - 1;
 
-  // Same boundary-restyling as splicing an automatic hop in
-  // (asLeadingSegment/asTrailingSegment above) - a replacement's own
-  // walk boundary only reads as a genuine start/end-of-trip "Walk" when
-  // it's actually replacing the very first or very last leg of the
-  // whole itinerary; anywhere in the middle, both of its boundaries are
-  // real mid-trip transfers.
   var replacementLegs = replacement.legs;
   if (!isLastOverall) replacementLegs = asLeadingSegment(replacementLegs);
   if (!isFirstOverall) replacementLegs = asTrailingSegment(replacementLegs);
@@ -381,18 +256,6 @@ RideOption withLegReplaced(
     ...shiftedRest,
   ]);
 
-  // Recomputed from scratch as the real sum of every leg's own fare
-  // (see sumRealLegFares/legFareRm) rather than "old total - an
-  // estimated removed share + the replacement's own total" - that
-  // subtraction trick used a flat per-km rate to guess what the
-  // ORIGINAL leg alone had contributed (kCostPerKmByMode, documented as
-  // an approximation for bus/train/ferry specifically - see that
-  // constant's own doc comment), which could drift away from what each
-  // row of the itinerary actually shows once TripDetailsPage started
-  // displaying every leg's own real fare (same [legFareRm]) - a trip's
-  // header total must always agree with its own rows, never just be in
-  // the right ballpark. CO2 keeps the old subtraction approach - there's
-  // no per-leg CO2 display for it to visibly disagree with.
   final newCost = sumRealLegFares(newLegs, from);
   final removedCo2 =
       (kCo2PerKmByMode[originalLeg.mode] ?? 0.0) *
@@ -408,10 +271,6 @@ RideOption withLegReplaced(
 
   return RideOption(
     id: id,
-    // routeSummary re-derives real route numbers straight from [legs]
-    // every time it's read (see RideOption.routeSummary), so it already
-    // picks up the replacement's real numbers without title itself
-    // needing to be rebuilt here.
     title: option.title,
     legs: newLegs,
     estCostRm: newCost,
@@ -425,39 +284,6 @@ RideOption withLegReplaced(
   );
 }
 
-/// Rebuilds [option] with every leg index in [replacements] swapped for
-/// its own real replacement, all in one pass - the per-leg counterpart
-/// to [withLegReplaced] (which only ever swaps ONE leg, leaving
-/// everything before it untouched on purpose - that's right for a
-/// person manually editing a single leg, but wrong for re-dating a
-/// whole trip). Used by TripDetailsPage._changeDepartureTime after it
-/// has independently confirmed a real, schedule-matching replacement
-/// for each of [option]'s own real (non-walk) legs at the newly-picked
-/// date/time - see that method for why this replaced a single
-/// whole-trip search-and-match (that approach - findMatchingRoute
-/// comparing candidates from a fresh search - could reliably reproduce
-/// a SIMPLE trip, but a multi-transfer trip's exact combination of
-/// buses is rarely what HERE's own best-ranked results for a fresh
-/// query happen to return, even when every individual bus in it is
-/// still genuinely running).
-///
-/// [initialDelta] shifts every leg from the very start (including any
-/// leg before the first replacement, and any leg that has no
-/// replacement at all, e.g. a walk/transfer) - the naive "just move the
-/// whole trip by this much" guess ([withTimeShifted]'s own approach).
-/// From each replacement onward, the shift actually carried forward is
-/// corrected to that replacement's own real confirmed end time instead
-/// of the naive guess, so a later leg is anchored to what really
-/// happens, not to an assumption - the same cascading-anchor idea
-/// [withLegReplaced] already uses for the legs after its one edit, just
-/// carried through every replacement in sequence here. Defaults to
-/// [Duration.zero] (nothing shifts except each replacement's own
-/// spliced-in legs), which happens to make this behave the same as
-/// calling [withLegReplaced] once per entry in [replacements] - but
-/// [withLegReplaced] itself is left untouched rather than rewritten in
-/// terms of this, since it's already relied on elsewhere
-/// (TransportController.swapRainyBikeLeg, TripDetailsPage._editLeg) and
-/// there's no reason to risk it.
 RideOption withLegsReplaced(
   RideOption option, {
   required Map<int, RideOption> replacements,
@@ -500,31 +326,12 @@ RideOption withLegsReplaced(
     final isFirstOverall = i == 0;
     final isLastOverall = i == legs.length - 1;
 
-    // Same boundary-restyling as withLegReplaced - a replacement's own
-    // walk boundary only reads as a genuine start/end-of-trip "Walk"
-    // when it's actually replacing the very first or very last leg of
-    // the whole itinerary.
     var replacementLegs = replacement.legs;
     if (!isLastOverall) replacementLegs = asLeadingSegment(replacementLegs);
     if (!isFirstOverall) replacementLegs = asTrailingSegment(replacementLegs);
 
-    // NOT shifted by carryDelta - unlike an untouched original leg
-    // (which is still carrying its OLD, pre-edit absolute time and
-    // genuinely needs the naive shift applied), [replacement] is
-    // already a real search result fetched at the correct probed time
-    // for this exact leg (see TripDetailsPage._changeDepartureTime,
-    // which anchors each leg's own probe time using this same
-    // cascading carryDelta before ever calling findLegAlternatives).
-    // Shifting it again here would double-apply that offset, landing
-    // this leg on a real bus/train's real timetable entry that has
-    // nothing to do with the trip's other legs - exactly the
-    // impossible-looking jump backwards/forwards in time this whole
-    // per-leg approach exists to avoid.
     newLegs.addAll(replacementLegs);
 
-    // From here on, carry forward however much THIS replacement's own
-    // real end time differs from where the naive shift-so-far would
-    // have placed the original leg's end - see the doc comment above.
     final originalEndAfterCarry = originalLeg.end.add(carryDelta);
     final newEnd = replacementLegs.isEmpty
         ? originalEndAfterCarry

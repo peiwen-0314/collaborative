@@ -6,10 +6,6 @@ import '../models/transport_mode.dart';
 import '../models/trip_leg.dart';
 import '../services/real_transit_stop_service.dart';
 
-/// Anything that can turn a From/To/when search into a list of ride
-/// options. Implemented by [MockTransportRepository] (always available,
-/// works offline) and by the live HERE-backed repository in
-/// `lib/services/here_transit_service.dart`.
 abstract class TransportRepository {
   Future<List<RideOption>> search({
     required LocationPoint from,
@@ -18,18 +14,6 @@ abstract class TransportRepository {
   });
 }
 
-/// Calculates realistic ride options for [from]/[to] from real data, not a
-/// fixed template list: it asks [RealTransitStopService] what bus stops
-/// and rail stations OpenStreetMap actually has mapped near both ends
-/// (the same real-data approach OsmBikeShareService already uses for
-/// shared bikes), only offers "Bus"/"MRT"/"KTM Komuter" when a genuine
-/// stop/station is there to use, and then *calculates* each option's
-/// duration/cost/CO2 from the known per-mode speed/cost/CO2 constants
-/// below - never a network fetch for the numbers themselves, only for
-/// figuring out which combinations are real. Taxi has no station
-/// dependency (a driver can go door to door) so it's always considered.
-/// This is what feeds every search, live HERE key or not - see
-/// `TransportService` for how its results get merged with HERE's.
 class MockTransportRepository implements TransportRepository {
   const MockTransportRepository();
 
@@ -47,10 +31,6 @@ class MockTransportRepository implements TransportRepository {
     final seed = Object.hash(from.name, to.name, departAt.year, departAt.month, departAt.day);
     final random = Random(seed);
 
-    // Best-effort: a failed/slow Overpass lookup just means bus/rail
-    // don't get offered this time (falls back to an empty availability,
-    // same as "nothing real found nearby") - never something that should
-    // block the rest of the search.
     RealTransitAvailability availability;
     try {
       availability = await RealTransitStopService().findNearby(from: from, to: to);
@@ -74,33 +54,6 @@ class MockTransportRepository implements TransportRepository {
     return _tagOptions(options);
   }
 
-  /// Calculates every transportation-mode combination that's real for
-  /// this specific trip, using [availability] (what
-  /// [RealTransitStopService] actually found mapped near [from]/[to]) as
-  /// the source of truth for bus and rail - not a distance guess. Taxi
-  /// has no station dependency, so it's always included. Bike is
-  /// deliberately NOT generated here at all - OsmBikeShareService already
-  /// does its own real-station lookup for shared bikes and
-  /// `TransportService` merges that result in separately, so calculating
-  /// a second, distance-guessed "maybe there's a bike" here would just
-  /// undercut the whole point of using real data.
-  ///
-  /// Every combination this returns still goes through [_buildOption]
-  /// exactly as before - its duration/cost/CO2 come from the same
-  /// distance-split plus per-mode speed/cost/CO2 constants, calculated,
-  /// never fetched from anywhere. What [availability] decides is only
-  /// *which* combinations are worth calculating at all.
-  ///
-  /// Ferry is the one exception still gated on distance alone (> 90km,
-  /// same as before) rather than a real-station lookup - Overpass'
-  /// coverage of ferry terminals in this region is too sparse to be a
-  /// reliable signal, unlike bus stops and rail stations which are
-  /// densely and reliably mapped.
-  ///
-  /// Pure walk is deliberately never generated here - a standalone
-  /// "just walk the whole way" option isn't a realistic thing to
-  /// recommend comparing against transit/car/bike for most trips this
-  /// app models, so this combination generator never produces one.
   List<_RouteTemplate> _templatesFor(double distanceKm, RealTransitAvailability availability) {
     final railMode = availability.railMode;
 
@@ -121,10 +74,6 @@ class MockTransportRepository implements TransportRepository {
       if (railMode != null) [railMode, TransportMode.taxi],
       if (availability.busAvailable) [TransportMode.bus, TransportMode.walk],
 
-      // The one three-leg case this app models: a long-haul KTM Komuter +
-      // bus trip that also needs a ferry crossing. Still requires a real
-      // KTM Komuter station at both ends (see above) on top of the
-      // distance cut-off.
       if (distanceKm > 90 && railMode == TransportMode.train)
         const [TransportMode.train, TransportMode.bus, TransportMode.ferry],
     ];
@@ -134,11 +83,6 @@ class MockTransportRepository implements TransportRepository {
     ];
   }
 
-  /// Builds a display title from a generated combination's modes, reusing
-  /// [_serviceName] (just [TransportMode.label]) for each mode - so
-  /// "MRT + Bus" comes from the same generic naming this class uses for
-  /// each leg, just joined together, and matches what a live HERE-derived
-  /// option would call the same combination.
   String _titleFor(List<TransportMode> modes) {
     return modes.map(_serviceName).join(' + ');
   }
@@ -151,10 +95,6 @@ class MockTransportRepository implements TransportRepository {
     required double distanceKm,
     required Random random,
   }) {
-    // Computed once per option (not per leg) - a single search stays
-    // within one region, and Penang/Klang Valley are this app's only two
-    // demo areas, so the search's own starting point is enough. See
-    // estimateFareRm/isPenangArea's doc comments.
     final searchIsPenang = isPenangArea(from);
 
     // Split the total distance across the "real" (non-transfer) legs.
@@ -169,26 +109,8 @@ class MockTransportRepository implements TransportRepository {
     for (var i = 0; i < legCount; i++) {
       final mode = template.modes[i];
 
-      // Public transport doesn't run 24 hours a day - searching at 1am
-      // for a train that only starts around 6am shouldn't produce an
-      // option that boards at 1am. Silently anchor this leg to the next
-      // time the mode is actually in service first (no visible "tile" for
-      // this - it's just when this option's timeline realistically
-      // starts, the same way Google Maps Transit shows several options
-      // each beginning at a different real departure time rather than one
-      // "departs the moment you searched" result).
       cursor = _nextAvailableDeparture(cursor, mode);
 
-      // A real bus/train/ferry also doesn't appear the instant you're
-      // ready to board it even *within* service hours - it runs to a
-      // schedule. Rather than pretending you catch it the moment you
-      // arrive (which is what made a walk time like "19 min" look like it
-      // magically lined up with the next departure), model a realistic
-      // wait based on this mode's typical service frequency in the Klang
-      // Valley before boarding. This is still an estimate (not a real
-      // live timetable lookup - see the note on MockTransportRepository
-      // above), but it's an honest one: it shows up as its own "Waiting
-      // for ..." step instead of being hidden.
       final waitRange = _waitMinutesRangeByMode[mode];
       if (waitRange != null) {
         final waitMinutes =
@@ -210,14 +132,6 @@ class MockTransportRepository implements TransportRepository {
         cursor = waitEnd;
       }
 
-      // Walk legs never carry the bulk of a long trip - and a "last
-      // mile" walk from a stop/station to the destination shouldn't run
-      // longer than a real one would either. Capped at 1.125km, which at
-      // this mode's own 4.5km/h walking speed below works out to about
-      // 15 minutes (13.5-16.5 with the timing jitter) - matches the same
-      // ~15min last-mile standard HereTransitService's own pedestrian
-      // walk radius now uses for live searches, so offline and live
-      // trips don't disagree on what a realistic last-mile walk is.
       final legDistanceKm = mode == TransportMode.walk
           ? min(shareBase, 1.125)
           : shareBase;
@@ -252,10 +166,6 @@ class MockTransportRepository implements TransportRepository {
 
       final isLastLeg = i == legCount - 1;
       if (!isLastLeg) {
-        // Just the walk/interchange between this stop and the next mode's
-        // stop - the wait for that *next* vehicle is handled by the
-        // "Wait for ..." leg at the top of the next iteration above, so
-        // this no longer has to double up as both walking AND waiting.
         final transferMinutes = 3 + random.nextInt(6); // 3-8 min
         final transferStart = cursor;
         final transferEnd = transferStart.add(Duration(minutes: transferMinutes));
@@ -288,19 +198,12 @@ class MockTransportRepository implements TransportRepository {
     );
   }
 
-  /// Adds relative "Low Carbon" / "Cost Effective" / "On Time" badges once
-  /// all options for this search are known, so the badges are meaningful
-  /// relative to the alternatives (not just absolute thresholds).
   List<RideOption> _tagOptions(List<RideOption> options) {
     if (options.isEmpty) return options;
     final cheapest = options.reduce(
       (a, b) => a.estCostRm <= b.estCostRm ? a : b,
     );
     final greenest = options.reduce((a, b) => a.co2Kg <= b.co2Kg ? a : b);
-    // "Fastest" should mean "gets you there soonest from right now", not
-    // just "shortest ride once it starts" - see RideOption.searchDepartAt's
-    // doc for why those two aren't the same thing for a real scheduled
-    // service.
     final fastest = options.reduce(
       (a, b) => a.totalElapsedFromSearch <= b.totalElapsedFromSearch ? a : b,
     );
@@ -345,15 +248,6 @@ class MockTransportRepository implements TransportRepository {
     }
   }
 
-  /// Just [TransportMode.label] - "Bus", "Taxi", "Train", etc. This used
-  /// to return branded names ("RapidKL Bus"/"Express Bus"/"KTM Komuter"/
-  /// "E-hailing") that didn't match what the live HERE-derived options
-  /// call the same mode (HERE-derived titles use [TransportMode.label]
-  /// directly - see HereTransitService._parseRoute), so the exact same
-  /// real-world way to travel could show up under two different names
-  /// depending on which source produced it. Kept as its own method
-  /// (rather than calling `mode.label` inline everywhere below) so every
-  /// call site here stays obviously in sync with the live side.
   String _serviceName(TransportMode mode) => mode.label;
 
   static const _speedKmh = {
@@ -370,13 +264,6 @@ class MockTransportRepository implements TransportRepository {
 
   static const _co2PerKm = kCo2PerKmByMode;
 
-  /// Rough (min, max) minutes-to-wait-for-the-next-departure by mode,
-  /// loosely based on typical Klang Valley service frequencies - MRT runs
-  /// often, KTM Komuter and ferries much less often, e-hailing is usually
-  /// a short driver ETA rather than a fixed schedule. There's no real
-  /// live timetable behind this (see the class-level note); it exists so
-  /// the mock timeline doesn't imply you catch every vehicle the instant
-  /// you show up. Walk has no entry - you don't "wait" to walk.
   static const _waitMinutesRangeByMode = <TransportMode, (int, int)>{
     TransportMode.mrt: (4, 9),
     TransportMode.bus: (8, 18),
@@ -386,12 +273,6 @@ class MockTransportRepository implements TransportRepository {
     TransportMode.other: (10, 15),
   };
 
-  /// Approximate (first-service, last-service) time-of-day, in minutes
-  /// since midnight, for each scheduled mode - loosely typical Klang
-  /// Valley operating hours, not the real published timetable for any
-  /// specific line. Taxi/e-hailing and walking have no entry here (no
-  /// operating-hours restriction: a driver or your own feet are available
-  /// any time of day).
   static const _serviceWindowByMode = <TransportMode, (int, int)>{
     TransportMode.mrt: (6 * 60, 23 * 60 + 30), // 06:00-23:30
     TransportMode.bus: (6 * 60, 23 * 60), // 06:00-23:00
@@ -400,12 +281,6 @@ class MockTransportRepository implements TransportRepository {
     TransportMode.other: (6 * 60, 23 * 60), // 06:00-23:00
   };
 
-  /// If [from] falls outside [mode]'s daily service window, returns the
-  /// next moment that mode is actually running (today's opening time, or
-  /// tomorrow's if [from] is already past closing) - instead of pretending
-  /// a scheduled vehicle exists at any hour. Modes with no entry in
-  /// [_serviceWindowByMode] (taxi, walk) are always available, so [from]
-  /// is returned unchanged.
   DateTime _nextAvailableDeparture(DateTime from, TransportMode mode) {
     final window = _serviceWindowByMode[mode];
     if (window == null) return from;
@@ -431,49 +306,24 @@ class _RouteTemplate {
   final List<TransportMode> modes;
 }
 
-/// How long someone would need to already be willing to walk (one way,
-/// at this app's assumed 4.5km/h walking speed - about 8 minutes)
-/// before it's worth asking HERE whether a real bus/train covers that
-/// same stretch at all - shared by every place that checks this (see
-/// findTransitHop's callers: OsmBikeShareService's first/last mile to
-/// a bike station, and TransportService's access/egress walk on a
-/// plain live transit option). Kept low on purpose: checking is cheap
-/// and never makes the walk-only option worse - a real hop only ever
-/// becomes an *additional* option, never a forced replacement - so
-/// it's better to check an 8-11 minute walk and find nothing than to
-/// never check at all.
 const kLongWalkThresholdKm = 0.6;
 
-/// Shared tag text used by TransportController.searchRides (real-time
-/// rain check via WeatherService, tags a live search result whenever it
-/// rides a real bike leg while it's currently raining near the search
-/// origin) and SavedListPage (same idea, but per-saved-trip, checked
-/// against the bike leg's own real station location - see
-/// TransportController.checkSavedTripsForRain). Kept as one shared
-/// constant, not two separate literal strings, so RideCard's chip
-/// styling (see MiniChip's `warning` flag) reliably recognizes it
-/// wherever it was added from.
 const kRainBikeTag = 'Rain - Ride Carefully';
 
-/// Shown as a warning-styled chip (see [kRainBikeTag]'s own doc comment
-/// on how MiniChip recognizes a warning tag) on a genuinely all-walking
-/// RideOption whose real walk still exceeds [kMaxWalkLegMinutes] - see
-/// TransportService._tagIfWalkOnlyLong for why this is tagged rather
-/// than dropped (there's no shorter-walk alternative to prefer instead,
-/// so hiding it would just mean showing nothing at all), and
-/// TransportService._hasExcessiveWalk for the case that IS dropped (a
-/// long walk mixed into an otherwise real bus/train/taxi/bike route,
-/// where a shorter-walk alternative might exist). Kept as one shared
-/// constant, not a literal string, for the same reason as
-/// [kRainBikeTag].
 const kWalkOnlyLongTag = 'Walk Only - No Other Route Found';
 
-/// Per-km rate used only for modes that genuinely *are* priced roughly
-/// per km in real life (a taxi/e-hailing fare, a bike-share's per-minute
-/// charge folded into a per-km equivalent) - see [estimateFareRm] for
-/// bus/train/mrt/ferry, none of which real operators price this way (see
-/// that function's doc comment for why a flat per-km rate was wrong for
-/// them).
+const kHazeOutdoorTag = 'Haze - Limit Outdoor Exposure';
+
+/// Same idea as [kHazeOutdoorTag], for WeatherService's own real-time
+/// extreme apparent-temperature check instead of haze.
+const kExtremeHeatTag = 'Extreme Heat - Limit Outdoor Exposure';
+
+const kShelteredPickTag = 'Weather-Safe Pick';
+
+const kOverBudgetTag = 'Over Your Budget';
+
+const kOverDurationTag = 'Longer Than You Want';
+
 const kCostPerKmByMode = {
   TransportMode.train: 0.12,
   TransportMode.mrt: 0.16,
@@ -487,12 +337,6 @@ const kCostPerKmByMode = {
   TransportMode.other: 0.15,
 };
 
-/// True when [point] falls within the Penang Island / Seberang Perai
-/// service area used by Rapid Penang, as opposed to the Klang Valley
-/// area used by RapidKL - this app's two demo regions don't overlap, so
-/// a simple bounding box on the search's own starting point is enough to
-/// tell their (genuinely different) bus fares apart. See
-/// [estimateFareRm].
 bool isPenangArea(LocationPoint point) {
   return point.lat >= 5.15 &&
       point.lat <= 5.60 &&
@@ -500,23 +344,6 @@ bool isPenangArea(LocationPoint point) {
       point.lng <= 100.55;
 }
 
-/// Rough real-world bounding boxes for Malaysia - Peninsular Malaysia
-/// and East Malaysia (Sabah/Sarawak, on Borneo) don't sit inside one
-/// neat rectangle together, so this checks both separately - the same
-/// simple "good enough for this app's purposes" bounding-box approach
-/// [isPenangArea] already uses above, rather than a real
-/// country-boundary lookup (this app has no such data/API for it).
-/// Used to gate the whole transportation module to Malaysia (see
-/// RideHomePage._detectFromLocation) - this app only has real transit
-/// data for Malaysia's own operators, so a detected location genuinely
-/// outside both boxes below has nothing real to search for at all.
-///
-/// Like [isPenangArea], a rectangle this coarse can't perfectly exclude
-/// a different country that happens to sit right alongside Malaysia's
-/// own borders (Singapore, for one, falls inside the Peninsular box) -
-/// an accepted tradeoff for staying this simple, since the practical
-/// goal is only ever "clearly not Malaysia", which this still catches
-/// reliably (e.g. anywhere outside Southeast Asia entirely).
 bool isInMalaysia(LocationPoint point) {
   final peninsularMalaysia =
       point.lat >= 0.85 &&
@@ -531,44 +358,12 @@ bool isInMalaysia(LocationPoint point) {
   return peninsularMalaysia || eastMalaysia;
 }
 
-/// The longest a single real walking leg is allowed to be before
-/// [TransportService] excludes the whole option it belongs to (see
-/// TransportService._hasExcessiveWalk) - a live HERE result can
-/// genuinely have a person walk 20+ minutes just to reach the nearest
-/// bus stop it picked, which is real data but not a walk most people
-/// would actually want as part of "take the bus", so an option like
-/// that is dropped in favour of a shorter-walk alternative when one
-/// exists (or an honest "no route found" when it doesn't) rather than
-/// shown as-is. Only applies to a walk leg inside an otherwise
-/// non-walking route - a trip that's genuinely all walking (no bus/
-/// train/taxi/bike leg to prefer instead) is left alone, same
-/// "coarse but documented" spirit as isPenangArea/isInMalaysia above.
 const kMaxWalkLegMinutes = 12;
 
-/// Malaysia's own fixed offset from UTC (MYT) - the country has used a
-/// single time zone with no daylight saving since 1982, so unlike
-/// almost anywhere else a constant offset is safe here, same "real but
-/// simple" tradeoff as isPenangArea/isInMalaysia above. Only meaningful
-/// alongside [malaysiaWallClockToInstant]/[instantToMalaysiaWallClock].
+const kMaxWaitBeforeDepartureMinutes = 180;
+
 const kMalaysiaUtcOffset = Duration(hours: 8);
 
-/// Reinterprets [wallClock]'s own year/month/day/hour/minute/second as
-/// Malaysia's local wall-clock time and returns the real absolute
-/// instant that represents - regardless of what timezone the device
-/// actually happens to be set to. Needed because this module builds
-/// values like "9am on this trip day" via the plain `DateTime(...)`
-/// constructor (see TransportController.planTransportationForPlan's
-/// `freeFrom`/`dayDate`), which Dart ties to the DEVICE's own
-/// timezone, not Malaysia's. A device not set to Malaysia time (a
-/// developer's own PC, a traveller's phone that hasn't updated its
-/// clock) would otherwise have this module silently ask HERE for
-/// transport at the wrong real moment entirely - and HERE would
-/// honestly answer with whatever real service actually runs at THAT
-/// wrong moment, which is exactly how a "Visit 10:04am" ends up next
-/// to a real bus that "Departs 10:14pm": the request itself asked for
-/// the wrong instant, not a display bug. Used by HereTransitService
-/// right before every live request; see [instantToMalaysiaWallClock]
-/// for the matching fix on the way back.
 DateTime malaysiaWallClockToInstant(DateTime wallClock) {
   return DateTime.utc(
     wallClock.year,
@@ -580,43 +375,10 @@ DateTime malaysiaWallClockToInstant(DateTime wallClock) {
   ).subtract(kMalaysiaUtcOffset);
 }
 
-/// The inverse of [malaysiaWallClockToInstant] - takes a real absolute
-/// instant (e.g. a live HERE result's own departure/arrival time,
-/// which correctly represents a real moment no matter how its own
-/// year/month/day/hour fields happen to be expressed) and returns a
-/// DateTime whose year/month/day/hour/minute/second are Malaysia's own
-/// wall-clock numbers for that instant - so this module's existing
-/// "just compare/format the fields directly" code (deadlines, visit
-/// windows, RideCard's own time labels, ...) keeps working exactly as
-/// before, only now those fields actually mean Malaysia time instead
-/// of whatever the device's own timezone happens to be.
 DateTime instantToMalaysiaWallClock(DateTime instant) {
   return instant.toUtc().add(kMalaysiaUtcOffset);
 }
 
-/// Real fare structures for the scheduled-service modes this app models,
-/// replacing a flat "rate x distance" estimate that every one of these
-/// operators' actual published fares contradicts - a Rapid bus, RapidKL
-/// train, KTM Komuter or the Penang ferry all charge a
-/// distance-*banded* or outright flat fare that plateaus/caps, not a
-/// charge that keeps climbing forever the further you go. Sourced from
-/// each operator's own published fare information (see the per-table
-/// doc comments below for links/anchor points); exact intermediate band
-/// boundaries for Rapid Penang and RapidKL rail are interpolated between
-/// the boundary fares each operator publishes (not confirmed
-/// station-by-station), and any of this can go stale if an operator
-/// revises fares - update the tables below rather than reverting to a
-/// flat per-km rate, which is a strictly worse approximation for all of
-/// them.
-/// This leg's own real fare, or null when it has no real fare of its
-/// own - a walk/transfer leg (free/not its own fare), or a leg with no
-/// known real distance (the offline/mock generator never stores one -
-/// see [TripLeg.distanceKm]'s doc comment). The one building block both
-/// [sumRealLegFares] (a whole option's accurate total, used after an
-/// edit - see withLegReplaced) and TripDetailsPage's per-row fare chip
-/// share, so a trip's header total and its own itinerary rows can never
-/// disagree with each other the way they could before this existed
-/// (see withLegReplaced's old approximate cost-subtraction comment).
 double? legFareRm(TripLeg leg, {required bool isPenangArea}) {
   if (leg.isTransfer || leg.mode == TransportMode.walk) return null;
   final km = leg.distanceKm;
@@ -624,13 +386,6 @@ double? legFareRm(TripLeg leg, {required bool isPenangArea}) {
   return estimateFareRm(leg.mode, km, isPenangArea: isPenangArea);
 }
 
-/// The accurate total fare for [legs] - just the real per-leg fares
-/// ([legFareRm]) summed, computed fresh from each leg's own real
-/// distance rather than carried/approximated forward from an earlier
-/// total. [from] is only used to decide the Penang-vs-Klang-Valley fare
-/// tables (see [isPenangArea]'s doc comment) - the same "the search's
-/// own starting point is enough" convention every other per-route cost
-/// calculation in this app already uses.
 double sumRealLegFares(List<TripLeg> legs, LocationPoint from) {
   final penang = isPenangArea(from);
   var total = 0.0;
@@ -640,14 +395,6 @@ double sumRealLegFares(List<TripLeg> legs, LocationPoint from) {
   return total;
 }
 
-/// The accurate total CO2 for [legs] - every leg's own emission
-/// contribution ((kCo2PerKmByMode[mode] ?? 0.05) * distanceKm) summed
-/// fresh, the same formula HereTransitService._parseRoute and the
-/// offline/mock generator both already use per-leg while building a
-/// [RideOption] in the first place (unlike [sumRealLegFares], WALK legs
-/// are included here too - a walk's own rate is 0.0 either way, but a
-/// leg with no known [TripLeg.distanceKm] still contributes nothing,
-/// matching how the total was originally built up leg-by-leg).
 double sumLegsCo2Kg(List<TripLeg> legs) {
   var total = 0.0;
   for (final leg in legs) {
@@ -658,18 +405,6 @@ double sumLegsCo2Kg(List<TripLeg> legs) {
   return total;
 }
 
-/// The cost to actually SHOW for [option] - a fresh, accurate recompute
-/// (see [sumRealLegFares]) whenever at least one of its legs has a real
-/// fare to recompute from, falling back to [RideOption.estCostRm]
-/// itself only when none do (a fully offline/mock option, whose legs
-/// never carry a real distance - see [TripLeg.distanceKm]'s doc comment
-/// - or a genuine walk-only live option, whose stored total is already
-/// correctly RM0.00 either way). Used by TripSummary instead of trusting
-/// [RideOption.estCostRm] directly, so an already-saved trip whose
-/// stored total predates withLegReplaced's fix to compute the same way
-/// (see that function's doc comment) self-heals on screen instead of
-/// staying stuck showing a stale number that disagrees with its own
-/// itinerary rows.
 double displayCostRm(RideOption option, LocationPoint from) {
   final penang = isPenangArea(from);
   var sum = 0.0;
@@ -699,16 +434,10 @@ double estimateFareRm(
     case TransportMode.mrt:
       return _rapidKlRailFare(distanceKm);
     case TransportMode.ferry:
-      // The Penang ferry (Butterworth <-> George Town) is a single fixed
-      // crossing, not a network with distance bands - RM2.00 adult fare
-      // as of writing (https://onpenang.com/butterworth-to-penang-island-ferry/).
       return 2.00;
     case TransportMode.walk:
       return 0.0;
     case TransportMode.taxi:
-      // Unlike the scheduled services above, a real e-hailing/taxi fare
-      // genuinely is close to a flat base charge plus a per-km rate -
-      // this one wasn't the inaccurate part.
       return 3.00 + kCostPerKmByMode[TransportMode.taxi]! * distanceKm;
     case TransportMode.bike:
     case TransportMode.other:
@@ -716,13 +445,6 @@ double estimateFareRm(
   }
 }
 
-/// Rapid Penang bus: distance-banded from RM1.40 for the shortest trips
-/// up to RM5.00 for the longest island routes
-/// (https://myrapid.com.my/bus-train/rapid-penang/,
-/// https://onpenang.com/bus-guide/). The current fare chart isn't
-/// published stage-by-stage, so the intermediate bands below are
-/// interpolated from Rapid's own older per-km-banded structure, scaled
-/// to today's published start/cap fares.
 double _rapidPenangBusFare(double km) {
   const bands = <(double, double)>[
     (7, 1.40),
@@ -737,22 +459,12 @@ double _rapidPenangBusFare(double km) {
   return 5.00; // Rapid Penang's published cap for the longest routes.
 }
 
-/// RapidKL bus: effectively a flat RM1.00 fare on the standard network
-/// (https://myrapid.com.my/bus-train/rapid-kl/bus/). Outskirt feeder
-/// routes run RM1.00-RM3.00 in reality; approximated here as a small
-/// distance-based step for genuinely long feeder-length rides only,
-/// rather than modelling every individual feeder route.
 double _rapidKlBusFare(double km) {
   if (km <= 15) return 1.00;
   if (km <= 30) return 2.00;
   return 3.00;
 }
 
-/// RapidKL rail (LRT/MRT/Monorail): distance-banded, capped at the
-/// network's published maximum single-journey fare of RM9.50. Banded by
-/// km rather than station count (which is what RapidKL's own fare chart
-/// actually uses) at a typical ~1.3km average station spacing, since
-/// this app doesn't model individual stations.
 double _rapidKlRailFare(double km) {
   const bands = <(double, double)>[
     (3, 1.20),
@@ -766,10 +478,6 @@ double _rapidKlRailFare(double km) {
   return 9.50;
 }
 
-/// KTM Komuter: distance-banded, linearly interpolated between real
-/// published fare/distance points from KL Sentral (Midvalley RM1.00 at
-/// ~6km, Subang Jaya RM2.30 at ~15km, Klang RM5.00 at ~30km, Port Klang
-/// RM5.60 at ~35km, Tanjung Malim RM10.60 at ~74km).
 double _ktmKomuterFare(double km) {
   const points = <(double, double)>[
     (0, 0.00),

@@ -1,30 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-/// Cloud persistence for a whole saved trip plan's planned transportation
-/// - the result TransportController.planTransportationForPlan computes,
-/// once the person actually saves it (see PlanTransportPage's Save
-/// action, the only writer). Storing it (instead of only ever
-/// recomputing it live) is what lets:
-///  - PlanTransportPage reopen a plan without re-running every search.
-///  - TripPlansPage show which plans already have their transportation
-///    planned vs. which still need it (see plannedPlanIds).
-///  - RideHomePage tell the person about the ride they already planned
-///    for today instead of re-suggesting a plan they've already handled
-///    (see TransportController.todaysTransportStatus).
-///
-/// Lives at `users/{uid}/planned_trip_transport/{planId}` - the same
-/// per-user shape SavedTripsStore already uses for the "Saved List"
-/// feature, keyed by the `saved_trip_plans` document id so there's
-/// exactly one transport plan per trip plan.
-///
-/// Deliberately stores/returns plain JSON maps, not
-/// TransportController's own PlannedPlanLeg class - this file has no
-/// model imports at all, so there's no import-direction question
-/// between a service and the controller that owns that class. The
-/// controller (which already knows both) converts to/from
-/// PlannedPlanLeg on its own side - see
-/// TransportController.getSavedTransportPlan/saveTransportPlan.
 class PlannedTripTransportStore {
   PlannedTripTransportStore._internal();
 
@@ -73,9 +49,6 @@ class PlannedTripTransportStore {
     await _collection().doc(planId).delete();
   }
 
-  /// Which of [planIds] already have a saved transport plan - one query
-  /// for the whole subcollection instead of one read per plan, used by
-  /// TripPlansPage to badge its list.
   Future<Set<String>> plannedPlanIds(Iterable<String> planIds) async {
     final ids = planIds.toSet();
     if (ids.isEmpty) return {};

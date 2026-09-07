@@ -15,11 +15,6 @@ class LocationLookupResult {
   final LocationPoint? point;
 }
 
-/// Wraps `geolocator` to ask for location permission and read the user's
-/// current position, then reverse-geocodes those coordinates into a real
-/// place name (via OpenStreetMap's free Nominatim service - no API key
-/// needed) so the "From" field shows an actual address instead of a
-/// generic "My Location" label.
 class LocationService {
   const LocationService();
 
@@ -44,10 +39,6 @@ class LocationService {
         );
       }
 
-      // Transportation uses the coordinate as the actual route origin, so
-      // request navigation-grade accuracy rather than accepting a coarse
-      // Wi-Fi/IP fix. The bounded timeout still prevents an emulator with
-      // no configured location from hanging the screen indefinitely.
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.bestForNavigation,
@@ -73,11 +64,6 @@ class LocationService {
     }
   }
 
-  /// Turns coordinates into a short "Area, City" style label matching the
-  /// rest of the app's place names (e.g. "Rawang, Kuala Lumpur"). Falls
-  /// back to "My Location" if the lookup fails for any reason (offline,
-  /// timeout, unexpected response) - reverse geocoding is a nice-to-have,
-  /// never something that should block using the app.
   Future<String> _reverseGeocode(double lat, double lng) async {
     if (ApiConfig.hasHereApiKey) {
       try {
@@ -139,37 +125,11 @@ class LocationService {
     }
   }
 
-  /// Resolves a free-text place name typed by the user (e.g. "cyberjaya" or
-  /// "1 utama") into a [LocationPoint], via OpenStreetMap's free Nominatim
-  /// search endpoint - no API key, no fixed list of choices, so the user
-  /// can type anywhere rather than only picking from a short preset list.
-  ///
-  /// Returns `null` if the keyword is blank, nothing matches, or the
-  /// lookup fails (offline, timeout, unexpected response).
   Future<LocationPoint?> searchPlace(String keyword) async {
     final results = await searchPlaces(keyword, limit: 1);
     return results.isEmpty ? null : results.first;
   }
 
-  /// Same as [searchPlace] but returns up to [limit] matches, so the "From"
-  /// / "To" fields can show live suggestions as the user types instead of
-  /// only resolving a single best guess.
-  ///
-  /// Purely live either way - no built-in preset list. When a HERE key is
-  /// configured, [_searchHereAutosuggest] is tried first: HERE's
-  /// Autosuggest API (https://autosuggest.search.hereapi.com) is a real
-  /// search-as-you-type product - the same kind of thing Google Maps'
-  /// search box uses - and finds a specific street/POI by partial name
-  /// (e.g. "Bishop Street") far more reliably than Nominatim's free-text
-  /// search, which is built for resolving one specific address rather
-  /// than ranking partial-keyword matches. [_searchNominatim] (the
-  /// original implementation) is the fallback - no HERE key configured,
-  /// or the HERE call fails/times out/returns nothing - so search never
-  /// goes fully dead just because one live source had a problem.
-  /// Duplicate-looking results (same short label) are collapsed to one.
-  ///
-  /// Returns an empty list if the keyword is too short, nothing matches,
-  /// or every live lookup fails/times out (offline, rate-limited, etc.).
   Future<List<LocationPoint>> searchPlaces(
     String keyword, {
     int limit = 8,
@@ -195,15 +155,9 @@ class LocationService {
       try {
         liveMatches = await _searchNominatim(query, limit: limit);
       } catch (_) {
-        // Live search failed/timed out - liveMatches just stays empty
-        // rather than throwing, so the UI shows "no results" instead of
-        // crashing.
       }
     }
 
-    // Either source can return several results that shorten to the same
-    // "Area, City" label (e.g. two POIs on the same road) - keep the list
-    // free of visually-duplicate suggestions.
     final seenPlaces = <String>{};
     final deduped = <LocationPoint>[];
     for (final point in liveMatches) {
@@ -215,16 +169,6 @@ class LocationService {
     return deduped.take(limit).toList();
   }
 
-  /// HERE's Autosuggest API - real search-as-you-type, ranked by
-  /// relevance against partial input, the way Google Maps' search box
-  /// behaves. `in=countryCode:MYS` scopes results to Malaysia (this app
-  /// only covers Malaysian routes) without needing a bias coordinate.
-  /// Only keeps items that are an actual place with real coordinates
-  /// (`resultType` like "place"/"street"/"locality"/"houseNumber" - all
-  /// carry a real `position`); HERE also returns "categoryQuery"/
-  /// "chainQuery" items ("restaurants near me"-style query refinements
-  /// with no coordinates of their own), which aren't a real destination
-  /// and are skipped.
   Future<List<LocationPoint>> _searchHereAutosuggest(
     String query, {
     required int limit,
@@ -257,10 +201,6 @@ class LocationService {
     for (final raw in items) {
       try {
         final item = raw as Map<String, dynamic>;
-        // For a mall/restaurant the access point is a better routing
-        // destination than the POI's visual centre (which may sit inside a
-        // large building). Fall back to the display position when HERE has
-        // no access point for the result.
         final access = item['access'] as List?;
         final position = access != null && access.isNotEmpty
             ? access.first as Map<String, dynamic>?
@@ -286,9 +226,6 @@ class LocationService {
     return points;
   }
 
-  /// The original implementation, now the fallback when no HERE key is
-  /// configured or [_searchHereAutosuggest] didn't produce anything -
-  /// OpenStreetMap's free Nominatim search endpoint, no API key needed.
   Future<List<LocationPoint>> _searchNominatim(
     String query, {
     required int limit,
@@ -330,20 +267,6 @@ class LocationService {
     return points;
   }
 
-  /// Builds the display name for a HERE Autosuggest item. `title` is the
-  /// entity HERE actually matched against the typed query - for a real
-  /// POI like "Gurney Paragon" that's already the exact name a user typed
-  /// and expects to see back, so it comes FIRST, not last: an earlier
-  /// version of this preferred a generic "district, city" label built
-  /// from `address` (e.g. "Central George Town, George Town") over the
-  /// real matched name, which meant search results never actually showed
-  /// what was typed/searched for - defeating the entire point of using a
-  /// real search-as-you-type API. `title` is only enriched with a short
-  /// city/district suffix when that adds real disambiguating context not
-  /// already present in the title itself (e.g. "Gurney Paragon, George
-  /// Town" rather than just "Gurney Paragon" with no area shown at all).
-  /// Falls back to the old pure-address shortening only for the rare item
-  /// that has no title at all.
   String? _nameFromHereItem(Map<String, dynamic> item) {
     final title = item['title'] as String?;
     final address = item['address'] as Map<String, dynamic>?;
@@ -374,10 +297,6 @@ class LocationService {
     return null;
   }
 
-  /// Shared "Area, City" style shortener for a Nominatim result - used for
-  /// both reverse geocoding (current location) and forward search (typed
-  /// keyword), since both return the same `address` / `display_name`
-  /// shape. Returns null if nothing usable was found in [body].
   String? _shortLabelFrom(Map<String, dynamic> body) {
     final address = body['address'] as Map<String, dynamic>?;
 

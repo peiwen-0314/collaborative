@@ -31,12 +31,6 @@ class TripSummary extends StatelessWidget {
           Expanded(
             child: SummaryCell(
               icon: Icons.schedule,
-              // totalElapsedFromSearch, not totalDuration - "Total
-              // Duration" should mean the real time from searching to
-              // arriving, including any wait for a real scheduled service
-              // to actually start running (see
-              // RideOption.searchDepartAt's doc comment), not just this
-              // option's own ride-only window.
               label: 'Total Duration',
               value: formatDuration(option.totalElapsedFromSearch),
             ),
@@ -97,12 +91,17 @@ class SummaryCell extends StatelessWidget {
                 style: const TextStyle(fontSize: 7, color: AppColors.muted),
               ),
               if (value.isNotEmpty)
-                Text(
-                  value,
-                  maxLines: 1,
-                  style: const TextStyle(
-                    fontSize: 7.5,
-                    fontWeight: FontWeight.w600,
+                Tooltip(
+                  message: value,
+                  waitDuration: const Duration(milliseconds: 400),
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 7.5,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
             ],
@@ -133,10 +132,6 @@ class TimelineItem extends StatelessWidget {
   final String subtitle;
   final String duration;
 
-  /// This leg's own real fare (e.g. "RM 1.50"), when known - see
-  /// TripDetailsPage's _timelineItems/fareLabel. Null for a walk or
-  /// transfer leg (free/not its own fare), or when the underlying leg
-  /// has no real distance to price (the offline/mock generator).
   final String? fareLabel;
 
   /// Transport mode for this leg's icon bubble. Left `null` for transfer
@@ -144,12 +139,6 @@ class TimelineItem extends StatelessWidget {
   final TransportMode? mode;
   final bool transfer;
 
-  /// Set only for a real, editable leg while TripDetailsPage is in Edit
-  /// mode (see its onLegTap) - shows a small pencil hint and makes the
-  /// whole row tappable to open the "choose a real alternative for this
-  /// segment" sheet. Left null for every other row (view mode, or a row
-  /// that isn't a real editable leg, like the synthetic "Change here"
-  /// marker), which renders exactly as before with no tap affordance.
   final VoidCallback? onTap;
 
   @override
@@ -254,10 +243,6 @@ class _TimelineCard extends StatelessWidget {
   final String? fareLabel;
   final bool transfer;
 
-  /// True while this row is tappable in TripDetailsPage's Edit mode -
-  /// shows a small pencil hint next to the duration chip so it's
-  /// visually obvious which rows can be swapped for a real alternative,
-  /// as opposed to every other row that just looks the same as always.
   final bool editable;
 
   @override

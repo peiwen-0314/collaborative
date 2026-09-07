@@ -11,37 +11,43 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  // ============================================================
-  // CONTROLLERS
-  // ============================================================
-
-  final TextEditingController nameController =
-  TextEditingController();
-
-  final TextEditingController emailController =
-  TextEditingController();
-
-  final TextEditingController passwordController =
-  TextEditingController();
-
+  final TextEditingController nameController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
   final TextEditingController confirmPasswordController =
   TextEditingController();
 
   final AuthController authController = AuthController();
 
-  // ============================================================
-  // VARIABLES
-  // ============================================================
-
   bool isLoading = false;
   bool hidePassword = true;
   bool hideConfirmPassword = true;
+  bool passwordFulfilled = false;
+  Map<String, bool> passwordChecklist = const {
+    'At least 8 characters': false,
+    'An uppercase letter': false,
+    'A lowercase letter': false,
+    'A number': false,
+    'A special character': false,
+  };
 
   static const Color mainGreen = Color(0xFF2E7D32);
+  static const Color fulfilledCyan = Color(0xFF00BCD4);
 
-  // ============================================================
-  // REGISTER
-  // ============================================================
+  @override
+  void initState() {
+    super.initState();
+    passwordController.addListener(_checkPasswordFulfilled);
+  }
+
+  void _checkPasswordFulfilled() {
+    final checklist =
+        authController.passwordRuleChecklist(passwordController.text);
+    setState(() {
+      passwordChecklist = checklist;
+      passwordFulfilled = checklist.values.every((met) => met);
+    });
+  }
 
   Future<void> register() async {
     setState(() {
@@ -79,12 +85,9 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
-  // ============================================================
-  // DISPOSE
-  // ============================================================
-
   @override
   void dispose() {
+    passwordController.removeListener(_checkPasswordFulfilled);
     nameController.dispose();
     emailController.dispose();
     passwordController.dispose();
@@ -92,39 +95,48 @@ class _RegisterPageState extends State<RegisterPage> {
     super.dispose();
   }
 
-  // ============================================================
-  // UI
-  // ============================================================
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-
       body: SafeArea(
         child: SingleChildScrollView(
           child: Column(
             children: [
 
-              // =================================================
-              // TOP HEADER
-              // =================================================
-
-              Container(
+              // =====================================
+              // TOP BACKGROUND SECTION
+              // Same hero treatment as LoginPage, with a back button
+              // overlaid on top since this page is pushed on top of it.
+              // =====================================
+              SizedBox(
+                height: 430,
                 width: double.infinity,
-                padding: const EdgeInsets.fromLTRB(
-                  20,
-                  16,
-                  20,
-                  24,
-                ),
-
-                child: Column(
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
+                    Image.asset(
+                      'assets/images/backgroundImg.png',
+                      fit: BoxFit.cover,
+                    ),
 
-                    // Back button
-                    Align(
-                      alignment: Alignment.centerLeft,
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.white.withOpacity(0.10),
+                            Colors.white.withOpacity(0.20),
+                            Colors.white.withOpacity(0.80),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    Positioned(
+                      left: 4,
+                      top: 4,
                       child: IconButton(
                         onPressed: () {
                           Navigator.pop(context);
@@ -136,54 +148,97 @@ class _RegisterPageState extends State<RegisterPage> {
                         ),
                       ),
                     ),
+
+                    Positioned(
+                      left: 30,
+                      bottom: 45,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.eco,
+                                size: 55,
+                                color: mainGreen,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'EcoTravel',
+                                style: TextStyle(
+                                  fontSize: 42,
+                                  fontWeight: FontWeight.bold,
+                                  color: mainGreen,
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 6),
+
+                          Text(
+                            'Travel Smart, Travel Green',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w500,
+                              color: mainGreen,
+                            ),
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          const Text(
+                            'Plan sustainable trips,\n'
+                                'explore responsibly,\n'
+                                'and protect our planet.',
+                            style: TextStyle(
+                              fontSize: 17,
+                              height: 1.5,
+                              color: Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
 
-              // =================================================
+              // =====================================
               // REGISTER FORM
-              // =================================================
-
+              // =====================================
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  16,
-                  5,
-                  16,
-                  25,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 28,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
 
-                    // =================================================
-                    // TITLE
-                    // =================================================
+                    const SizedBox(height: 10),
 
-                    const Text(
+                    Text(
                       'Create Account',
                       style: TextStyle(
-                        fontSize: 23,
+                        fontSize: 30,
                         fontWeight: FontWeight.bold,
                         color: mainGreen,
                       ),
                     ),
 
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 8),
 
-                    Text(
+                    const Text(
                       'Join EcoTravel and start your sustainable journey.',
                       style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade600,
+                        fontSize: 16,
+                        color: Colors.grey,
                       ),
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 30),
 
-                    // =================================================
-                    // FULL NAME
-                    // =================================================
-
+                    // Full Name
                     TextField(
                       controller: nameController,
                       textInputAction: TextInputAction.next,
@@ -194,12 +249,9 @@ class _RegisterPageState extends State<RegisterPage> {
                       ),
                     ),
 
-                    const SizedBox(height: 13),
+                    const SizedBox(height: 18),
 
-                    // =================================================
-                    // EMAIL
-                    // =================================================
-
+                    // Email
                     TextField(
                       controller: emailController,
                       keyboardType: TextInputType.emailAddress,
@@ -210,12 +262,9 @@ class _RegisterPageState extends State<RegisterPage> {
                       ),
                     ),
 
-                    const SizedBox(height: 13),
+                    const SizedBox(height: 18),
 
-                    // =================================================
-                    // PASSWORD
-                    // =================================================
-
+                    // Password
                     TextField(
                       controller: passwordController,
                       obscureText: hidePassword,
@@ -223,6 +272,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       decoration: inputDecoration(
                         hint: 'Password',
                         icon: Icons.lock_outline,
+                        valid: passwordFulfilled,
                         suffix: IconButton(
                           onPressed: () {
                             setState(() {
@@ -233,19 +283,56 @@ class _RegisterPageState extends State<RegisterPage> {
                             hidePassword
                                 ? Icons.visibility_off_outlined
                                 : Icons.visibility_outlined,
-                            color: mainGreen,
-                            size: 20,
+                            color: passwordFulfilled ? fulfilledCyan : mainGreen,
                           ),
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 13),
+                    const SizedBox(height: 8),
 
-                    // =================================================
-                    // CONFIRM PASSWORD
-                    // =================================================
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final rule in passwordChecklist.entries)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 3),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    rule.value
+                                        ? Icons.check_circle
+                                        : Icons.cancel,
+                                    size: 14,
+                                    color: rule.value
+                                        ? Colors.green.shade600
+                                        : Colors.red.shade400,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    rule.key,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: rule.value
+                                          ? Colors.green.shade700
+                                          : Colors.red.shade400,
+                                      fontWeight: rule.value
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
 
+                    const SizedBox(height: 18),
+
+                    // Confirm Password
                     TextField(
                       controller: confirmPasswordController,
                       obscureText: hideConfirmPassword,
@@ -261,8 +348,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         suffix: IconButton(
                           onPressed: () {
                             setState(() {
-                              hideConfirmPassword =
-                              !hideConfirmPassword;
+                              hideConfirmPassword = !hideConfirmPassword;
                             });
                           },
                           icon: Icon(
@@ -270,21 +356,17 @@ class _RegisterPageState extends State<RegisterPage> {
                                 ? Icons.visibility_off_outlined
                                 : Icons.visibility_outlined,
                             color: mainGreen,
-                            size: 20,
                           ),
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 22),
+                    const SizedBox(height: 12),
 
-                    // =================================================
-                    // CREATE ACCOUNT BUTTON
-                    // =================================================
-
+                    // Create Account Button
                     SizedBox(
                       width: double.infinity,
-                      height: 45,
+                      height: 55,
                       child: ElevatedButton(
                         onPressed: isLoading ? null : register,
                         style: ElevatedButton.styleFrom(
@@ -294,13 +376,13 @@ class _RegisterPageState extends State<RegisterPage> {
                           mainGreen.withOpacity(0.55),
                           elevation: 0,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(16),
                           ),
                         ),
                         child: isLoading
                             ? const SizedBox(
-                          width: 20,
-                          height: 20,
+                          height: 24,
+                          width: 24,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             color: Colors.white,
@@ -313,57 +395,45 @@ class _RegisterPageState extends State<RegisterPage> {
                             Text(
                               'Create Account',
                               style: TextStyle(
-                                fontSize: 14,
+                                fontSize: 18,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-
-                            SizedBox(width: 7),
-
-                            Icon(
-                              Icons.eco,
-                              size: 17,
-                            ),
+                            SizedBox(width: 10),
+                            Icon(Icons.eco),
                           ],
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 28),
 
-                    // =================================================
-                    // LOGIN LINK
-                    // =================================================
-
-                    Center(
-                      child: Wrap(
-                        alignment: WrapAlignment.center,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          Text(
-                            'Already have an account?',
+                    // Login link
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text(
+                          'Already have an account?',
+                          style: TextStyle(
+                            color: Colors.grey,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                          },
+                          child: Text(
+                            'Login',
                             style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade600,
+                              color: mainGreen,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-
-                          TextButton(
-                            onPressed: () {
-                              Navigator.pop(context);
-                            },
-                            child: const Text(
-                              'Login',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: mainGreen,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
+
+                    const SizedBox(height: 35),
                   ],
                 ),
               ),
@@ -374,60 +444,46 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 
-  // ============================================================
-  // REUSABLE INPUT DESIGN
-  // Same design as Login Page
-  // ============================================================
-
+  // Same input styling as LoginPage's own fields - [valid] lights the
+  // field up fulfilledCyan instead of the usual mainGreen, used by the
+  // Password field so it turns cyan the moment it fulfils the rules
+  // (see passwordFulfilled/_checkPasswordFulfilled) rather than only
+  // showing red/green feedback once Submit is pressed.
   InputDecoration inputDecoration({
     required String hint,
     required IconData icon,
     Widget? suffix,
+    bool valid = false,
   }) {
+    final Color activeColor = valid ? fulfilledCyan : mainGreen;
     return InputDecoration(
       hintText: hint,
-
-      hintStyle: TextStyle(
-        fontSize: 12,
-        color: Colors.grey.shade500,
-      ),
-
       prefixIcon: Icon(
         icon,
-        color: mainGreen,
-        size: 19,
+        color: activeColor,
       ),
-
       suffixIcon: suffix,
-
       filled: true,
       fillColor: Colors.white,
-
       contentPadding: const EdgeInsets.symmetric(
-        vertical: 13,
-        horizontal: 12,
+        vertical: 18,
       ),
-
-      // Normal
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(
-          color: mainGreen.withOpacity(0.30),
+          color: valid ? fulfilledCyan : mainGreen.withOpacity(0.25),
+          width: valid ? 1.5 : 1,
         ),
       ),
-
-      // Focus
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(
-          color: mainGreen,
-          width: 1.3,
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide(
+          color: activeColor,
+          width: 1.5,
         ),
       ),
-
-      // Error
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(
           color: Colors.red,
         ),

@@ -4,46 +4,13 @@ import '../controllers/transport_controller.dart';
 import '../core/app_theme.dart';
 import '../core/formatters.dart';
 import '../models/location_point.dart';
+import '../models/ride_option.dart';
 import '../models/saved_trip_plan.dart';
 import '../services/location_service.dart';
 import '../widgets/location_row.dart';
 import '../widgets/ride_card.dart';
 import 'trip_details_page.dart';
 
-/// Shows a real, bookable transportation route for every attraction in
-/// [plan], grouped by day - "plan transportation for the whole trip",
-/// not just a single destination. See
-/// TransportController.planTransportationForPlan for how each leg is
-/// computed (day by day, working backwards from each attraction's own
-/// planned arrival deadline). Reached by tapping a plan on
-/// TripPlansPage.
-///
-/// If this plan already has a transportation plan saved (see [_save] -
-/// TransportController.getSavedTransportPlan/saveTransportPlan), that
-/// saved plan is shown directly - no new searches - and TripPlansPage's
-/// list badges it as planned (see TripPlansPage's own doc comment).
-/// Otherwise, once the person confirms they actually want this (see
-/// [_confirmAndPlan] - a real GPS fix and a batch of real searches
-/// shouldn't fire just from opening this page), a fresh plan is
-/// computed and saved to Firebase automatically - no manual Save step.
-/// Any attraction that couldn't be planned shows its own orange
-/// warning box with just an inline Retry button (see
-/// _UnplannedLegTile) - changing the starting point is only offered
-/// once a leg actually HAS a route, right there in its own detail page
-/// (see [_openLeg]'s isPlanLeg/onChangeFrom on TripDetailsPage).
-///
-/// The AppBar's Re-plan action (see [_confirmReplan]) is a DIFFERENT
-/// thing from a per-leg Retry: a saved plan is shown as-is with no new
-/// searches (directly above), so it can go stale in ways a per-leg
-/// Retry can't fix - e.g. this app's own transport-timing logic
-/// changing after the plan was already saved, or a since-updated real
-/// bus/train schedule - without anything about any individual leg
-/// having failed. Re-plan redoes every leg from a fresh GPS fix, same
-/// as the very first "Plan Transportation" confirmation, and overwrites
-/// the saved plan with the result (see [saveTransportPlan]'s own doc
-/// comment: "re-plan is just calling this again with a freshly computed
-/// list") - confirmed first since it's a real batch of live searches,
-/// not a free action.
 class PlanTransportPage extends StatefulWidget {
   const PlanTransportPage({super.key, required this.plan});
 
@@ -60,21 +27,9 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
   List<PlannedPlanLeg>? _legs;
   String? _error;
 
-  /// True when [_legs] is exactly what's already saved for this plan
-  /// (TransportController.getSavedTransportPlan) - false while a fresh
-  /// plan is still being computed (see [_computeFreshPlan]), which
-  /// saves it to Firebase automatically as soon as it's ready (no
-  /// manual Save action - see the AppBar's own doc comment).
   bool _isSaved = false;
   bool _saving = false;
 
-  /// True once the person has actually agreed to run the (real,
-  /// multi-search) planning computation - see [_buildBody]'s
-  /// confirmation prompt. Nothing is searched just from opening this
-  /// page when there's no saved plan yet; a real GPS fix and a handful
-  /// of live route searches shouldn't fire without the person having
-  /// asked for it first. Irrelevant (never checked) once a saved plan
-  /// was found - that's just shown, no confirmation needed to VIEW it.
   bool _confirmed = false;
 
   @override
@@ -83,11 +38,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
     _plan();
   }
 
-  /// Loads whatever's already saved for this plan first - see this
-  /// class's own doc comment. If nothing was saved yet, this does NOT
-  /// start computing one - it leaves [_legs]/[_error] both null with
-  /// [_confirmed] still false, which [_buildBody] reads as "ask first"
-  /// (see [_confirmAndPlan]).
   Future<void> _plan() async {
     setState(() {
       _legs = null;
@@ -116,13 +66,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
     await _computeFreshPlan();
   }
 
-  /// The AppBar's Re-plan action - see this class's own doc comment for
-  /// why this is different from a per-leg Retry. Asks first (same
-  /// reasoning as [_confirmAndPlan]: a real GPS fix plus a full batch
-  /// of live searches, not something to fire by accident from a single
-  /// tap), then just reuses [_computeFreshPlan] - it already resets
-  /// [_legs], detects location fresh, and saves the result over
-  /// whatever was there before.
   Future<void> _confirmReplan() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -151,12 +94,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
     await _computeFreshPlan();
   }
 
-  /// The error state's Retry button - re-runs whichever step actually
-  /// failed instead of always re-checking for a saved plan: once the
-  /// person has confirmed (see [_confirmAndPlan]), an error can only
-  /// have come from the real computation itself, so retrying means
-  /// running that again, not silently landing back on the "ask first"
-  /// prompt with nothing happening.
   void _retry() {
     if (_confirmed) {
       _computeFreshPlan();
@@ -172,11 +109,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
       _isSaved = false;
     });
     try {
-      // Every day of the plan starts fresh from wherever the person
-      // actually is right now (see planTransportationForPlan's doc
-      // comment on the day-trip assumption) - a real GPS fix, not a
-      // guess, since it becomes the literal search origin for the
-      // whole plan.
       final locationResult = await _locationService.detectCurrentLocation();
       final startingFrom = locationResult.point;
       if (startingFrom == null) {
@@ -195,11 +127,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
       );
       if (!mounted) return;
       setState(() => _legs = legs);
-      // Save automatically as soon as a fresh plan is computed - the
-      // person already agreed to plan transportation for this trip (see
-      // _confirmAndPlan), so there's no separate manual Save step (see
-      // the AppBar's own doc comment) - if this particular save attempt
-      // fails, _save's own error handling surfaces that directly.
       await _save();
     } catch (error) {
       if (!mounted) return;
@@ -234,9 +161,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
     final option = leg.option;
     final to = leg.to;
     if (option == null || to == null) return;
-    // -1 should never actually happen (leg came from _legs in the first
-    // place - see _buildDayList), but isPlanLeg/onChangeFrom simply
-    // don't get wired up rather than crashing if it somehow did.
     final index = _legs?.indexOf(leg) ?? -1;
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -249,22 +173,19 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
           onChangeFrom: index == -1
               ? null
               : (query) => _searchAndRetry(index, query),
+          onAutoDetectFrom: index == -1
+              ? null
+              : () => _detectAndRetry(index),
+          onSaveEditedLeg: index == -1
+              ? null
+              : (editedOption) => _saveEditedLeg(index, editedOption),
         ),
       ),
     );
   }
 
-  /// Indices into [_legs] currently being retried - lets that one tile
-  /// show a spinner and disable its own buttons without blocking the
-  /// rest of the list (a person can retry more than one broken leg).
   final Set<int> _retrying = {};
 
-  /// Looks up the original SavedTripPlanAttraction (address/area -
-  /// needed to re-geocode) behind [leg] - PlannedPlanLeg itself only
-  /// keeps the attraction's name, not its full saved-plan record (see
-  /// PlannedPlanLeg's doc comment on why it's deliberately a thin,
-  /// independent shape), so a retry looks it back up from [widget.plan]
-  /// by day + name.
   SavedTripPlanAttraction? _attractionFor(PlannedPlanLeg leg) {
     for (final candidate in widget.plan.attractionsForDay(leg.day)) {
       if (candidate.name == leg.attractionName) return candidate;
@@ -272,11 +193,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
     return null;
   }
 
-  /// Retries planning [_legs][index] from [from] (see
-  /// TransportController.retryPlanLeg) and, on success or failure alike,
-  /// replaces just that one entry in place and re-saves the whole plan -
-  /// consistent with every other change to this plan being saved to
-  /// Firebase automatically, not just the very first computation.
   Future<PlannedPlanLeg?> _applyRetriedLeg(
     int index,
     LocationPoint from,
@@ -294,6 +210,10 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
       return null;
     }
 
+    final earliestDepart = index > 0
+        ? legs[index - 1].visitEnd
+        : leg.visitStart.subtract(const Duration(hours: 3));
+
     setState(() => _retrying.add(index));
     try {
       final updated = await _controller.retryPlanLeg(
@@ -302,6 +222,7 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
         day: leg.day,
         visitStart: leg.visitStart,
         visitEnd: leg.visitEnd,
+        earliestDepart: earliestDepart,
       );
       if (!mounted) return updated;
       setState(() {
@@ -322,6 +243,17 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
     }
   }
 
+  Future<void> _saveEditedLeg(int index, RideOption option) async {
+    final legs = _legs;
+    if (legs == null || index < 0 || index >= legs.length) return;
+    setState(() {
+      final newLegs = List<PlannedPlanLeg>.from(legs);
+      newLegs[index] = newLegs[index].withOption(option);
+      _legs = newLegs;
+    });
+    await _save();
+  }
+
   /// Plain retry - same starting point as before, in case the earlier
   /// failure was just a transient search/network hiccup.
   Future<void> _retryLeg(int index) {
@@ -332,14 +264,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
     return _applyRetriedLeg(index, legs[index].from);
   }
 
-  /// Re-geocodes [query] and retries planning [_legs][index] from the
-  /// resulting point (see [_applyRetriedLeg]) - the "change starting
-  /// point" action behind a plan-generated TripDetailsPage's own
-  /// editable From row (see [_openLeg]). Returns null only when [query]
-  /// itself couldn't be resolved to a real place at all; a query that
-  /// resolves but still can't reach the attraction still returns the
-  /// resulting (still-unplanned) [PlannedPlanLeg], same as
-  /// [_applyRetriedLeg] always does, so the caller can show why.
   Future<PlannedPlanLeg?> _searchAndRetry(int index, String query) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return null;
@@ -348,6 +272,27 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
     return _applyRetriedLeg(index, point);
   }
 
+  Future<PlannedPlanLeg?> _detectAndRetry(int index) async {
+    final result = await _locationService.detectCurrentLocation();
+    if (!mounted) return null;
+    final point = result.point;
+    if (result.status != LocationLookupStatus.success || point == null) {
+      final message = switch (result.status) {
+        LocationLookupStatus.permissionDenied =>
+          'Location permission denied - search a starting point instead.',
+        LocationLookupStatus.serviceDisabled =>
+          'Location services are off - search a starting point instead.',
+        _ =>
+          "Couldn't get an accurate GPS fix - search a starting point "
+              'instead.',
+      };
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+      return null;
+    }
+    return _applyRetriedLeg(index, point);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -361,10 +306,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
           state != null && state.isNotEmpty ? state : 'Trip Plan',
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
         ),
-        // No manual Save action here on purpose - a computed plan is
-        // already saved to Firebase automatically (see
-        // _computeFreshPlan/_applyRetriedLeg's own doc comments), so
-        // there's nothing left for the person to trigger by hand.
         actions: [
           if (_legs != null)
             IconButton(
@@ -408,10 +349,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
 
     final legs = _legs;
     if (legs == null && !_confirmed) {
-      // Nothing saved yet, and the person hasn't agreed to a fresh
-      // search-heavy computation - ask first instead of silently
-      // detecting their location and firing off a batch of real
-      // searches the moment this page opens.
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -550,9 +487,6 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
   }
 }
 
-/// e.g. "Today", "Tomorrow", "24 Aug" - the day-label half of
-/// formatFriendlyDateTime, without the clock time (each attraction
-/// already shows its own real visit time via _PlannedLegTile).
 String _dayDateLabel(DateTime date) {
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
@@ -567,12 +501,6 @@ String _dayDateLabel(DateTime date) {
   return '${date.day} ${months[date.month - 1]}';
 }
 
-/// One attraction's slot within a day: which attraction it is, the real
-/// ride to get there (or [_UnplannedLegTile] when one couldn't be
-/// found), and the real visit window worked out from that attraction's
-/// own saved opening/closing time + recommended duration - see
-/// TransportController.planTransportationForPlan and
-/// PlannedPlanLeg.visitStart/visitEnd's doc comments.
 class _PlannedLegTile extends StatelessWidget {
   const _PlannedLegTile({
     required this.leg,
@@ -623,11 +551,6 @@ class _PlannedLegTile extends StatelessWidget {
         else
           _UnplannedLegTile(
             name: leg.attractionName,
-            // Genuinely couldn't tell where this attraction even IS
-            // (leg.to null) vs. a real place was found but no real
-            // transport reaches it - two different problems, so
-            // _UnplannedLegTile says which one this actually is instead
-            // of one generic message for both.
             locationUnresolved: leg.to == null,
             retrying: retrying,
             onRetry: onRetry,
@@ -641,32 +564,11 @@ class _PlannedLegTile extends StatelessWidget {
             style: const TextStyle(fontSize: 10.5, color: AppColors.muted),
           ),
         ),
-        // The orange "couldn't meet this deadline" chip that used to
-        // render here (from leg.warning) was removed at the person's
-        // own request - leg.warning itself is untouched (still
-        // computed by TransportController.planTransportationForPlan/
-        // _planLegToMeetDeadline exactly as before, and still there
-        // for any future caller that wants it - see e.g.
-        // TripDetailsPage's own _changeDepartureTime, which still
-        // surfaces it as a transient snackbar on failure), this just
-        // stops THIS tile from displaying it permanently under every
-        // affected leg.
       ],
     );
   }
 }
 
-/// Shown in place of a RideCard for a [PlannedPlanLeg] whose address
-/// couldn't be geocoded or whose search came back with no real route -
-/// see TransportController.planTransportationForPlan's doc comment for
-/// why this never happens silently. [locationUnresolved] tells these
-/// two failures apart, since they mean different things to the person
-/// looking at this: not knowing where "$name" even IS (its saved
-/// address is missing/wrong - see
-/// TransportController._geocodeSavedPlanAttraction's doc comment on how
-/// hard this already tries before giving up) is a different problem
-/// than knowing exactly where it is but finding no real bus/train/etc.
-/// that reaches it in time.
 class _UnplannedLegTile extends StatelessWidget {
   const _UnplannedLegTile({
     required this.name,

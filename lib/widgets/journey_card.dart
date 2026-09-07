@@ -9,12 +9,6 @@ import '../services/location_service.dart';
 
 enum _ActiveField { none, from, to }
 
-/// The From/To card. Both fields are editable in place - typing shows a
-/// live list of matching Malaysian places (via free Nominatim search)
-/// floating just underneath the card, instead of opening a separate picker
-/// screen. The list is a floating overlay (via [CompositedTransformFollower])
-/// rather than an inline widget, so it never pushes the date chip /
-/// recommendations / saved list further down the page while it's open.
 class JourneyCard extends StatefulWidget {
   const JourneyCard({
     super.key,
@@ -33,9 +27,6 @@ class JourneyCard extends StatefulWidget {
   /// Null until the user picks a destination.
   final LocationPoint? to;
 
-  /// Called once the user taps a suggestion for "From". Not called if the
-  /// picked place is the same as the current "To" - the card shows its own
-  /// inline warning and leaves the field as-is in that case.
   final ValueChanged<LocationPoint> onFromSelected;
 
   /// Same as [onFromSelected] but for "To".
@@ -83,9 +74,6 @@ class _JourneyCardState extends State<JourneyCard> {
   @override
   void didUpdateWidget(covariant JourneyCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Keep the text in sync with externally-driven changes (auto location
-    // detection landing, a swap) - but never while the user is actively
-    // typing in that field, or we'd yank the cursor out from under them.
     if (widget.from?.name != oldWidget.from?.name && !_fromFocus.hasFocus) {
       _fromController.text = widget.from?.name ?? '';
     }
@@ -124,9 +112,6 @@ class _JourneyCardState extends State<JourneyCard> {
       _syncOverlay();
       return;
     }
-    // Neither field has focus. Give a tap on a suggestion tile a moment to
-    // register (tapping the overlay briefly steals focus) before tearing
-    // the suggestions panel down.
     Future.delayed(const Duration(milliseconds: 180), () {
       if (!mounted || _fromFocus.hasFocus || _toFocus.hasFocus) return;
       setState(() {
@@ -161,9 +146,6 @@ class _JourneyCardState extends State<JourneyCard> {
     );
   }
 
-  /// Runs a search immediately for [field], bypassing the debounce - used
-  /// by the search button/keyboard-submit so tapping it always feels
-  /// responsive, instead of only reacting after the user pauses typing.
   void _searchNow(String query, _ActiveField field) {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return;
@@ -180,9 +162,6 @@ class _JourneyCardState extends State<JourneyCard> {
 
   Future<void> _runSearch(String query) async {
     final requestId = ++_requestId;
-    // Rank POIs around the trip origin/current location, like a maps search
-    // box, instead of returning equally named malls or restaurants in an
-    // arbitrary nationwide order.
     final results = await _locationService.searchPlaces(
       query,
       bias: widget.from,
@@ -227,9 +206,6 @@ class _JourneyCardState extends State<JourneyCard> {
       _activeField != _ActiveField.none &&
       (_loadingSuggestions || _suggestions.isNotEmpty || _inlineError != null);
 
-  /// Inserts, rebuilds, or removes the floating suggestions overlay so it
-  /// always reflects the latest state - without ever taking up space in
-  /// this widget's own layout (see the class doc comment).
   void _syncOverlay() {
     if (!_shouldShowPanel) {
       _overlayEntry?.remove();
@@ -352,9 +328,6 @@ class _EditableLocationRow extends StatelessWidget {
   final String hintText;
   final ValueChanged<String> onChanged;
 
-  /// Runs a search for whatever is currently typed, right away - the
-  /// button next to the field, and pressing the keyboard's search/enter
-  /// key, both call this instead of waiting for the auto-search debounce.
   final VoidCallback onSearchPressed;
   final bool outlined;
 
@@ -423,9 +396,6 @@ class _EditableLocationRow extends StatelessWidget {
   }
 }
 
-/// The floating suggestions panel itself - styled to match the app's
-/// existing "Recommended For You" tiles (pale-green rounded rows) rather
-/// than a generic list, per the app's own design.
 class _SuggestionsPanel extends StatelessWidget {
   const _SuggestionsPanel({
     required this.loading,

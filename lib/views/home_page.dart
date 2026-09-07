@@ -1,9 +1,11 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../controllers/auth_controller.dart';
 import '../controllers/home_controller.dart';
 import '../controllers/personalization_controller.dart';
 import '../models/attraction.dart';
+import '../models/user.dart';
 import '../services/heritage_nearby_service.dart';
 import '../widgets/eco_bottom_navigation.dart';
 
@@ -12,6 +14,7 @@ import 'attraction_detail_page.dart';
 import 'attraction_search_page.dart';
 import 'cultural_heritage_page.dart';
 import 'heritage_detail_page.dart';
+import 'profile_page.dart';
 import 'ride_home_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -66,6 +69,17 @@ class _HomePageState extends State<HomePage> {
 
   bool _nearbyPopupVisible = false;
 
+  final AuthController _authController = AuthController();
+
+  /// The signed-in user's own Firestore users/{uid} doc (name/email/
+  /// photoUrl) - see ProfilePage, which is where this is actually kept
+  /// up to date. Loaded once here too so the header's greeting/avatar
+  /// (see _displayName/_header) can show the real name and profile
+  /// picture instead of FirebaseAuth's own displayName, which is null
+  /// for a plain email/password account and was silently falling back
+  /// to "Explorer" for every such user.
+  UserModel? _profile;
+
   // ============================================================
   // INIT
   // ============================================================
@@ -84,10 +98,28 @@ class _HomePageState extends State<HomePage> {
 
     _controller.loadHomeData();
     _personalizationController.loadRecommendations();
+    _loadProfile();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showNearbyPopupOncePerRun();
     });
+  }
+
+  Future<void> _loadProfile() async {
+    final loaded = await _authController.getCurrentUserProfile();
+    if (!mounted) return;
+    setState(() => _profile = loaded);
+  }
+
+  /// Opens ProfilePage and refreshes [_profile] on return - a person
+  /// can change their name/picture there, and this header should show
+  /// that right away rather than only after the whole page is rebuilt
+  /// some other way.
+  void _openProfile() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfilePage()),
+    ).then((_) => _loadProfile());
   }
 
   void _refreshPage() {
@@ -625,7 +657,7 @@ class _HomePageState extends State<HomePage> {
 
         onCommunityTap: widget.onCommunityTap,
 
-        onProfileTap: widget.onProfileTap,
+        onProfileTap: widget.onProfileTap ?? _openProfile,
       ),
     );
   }
@@ -666,7 +698,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(width: 1),
 
             GestureDetector(
-              onTap: widget.onProfileTap,
+              onTap: widget.onProfileTap ?? _openProfile,
               child: Container(
                 width: 35,
                 height: 35,
@@ -676,11 +708,19 @@ class _HomePageState extends State<HomePage> {
                     color: textColor,
                     width: 1.3,
                   ),
+                  image: _profile?.photoUrl != null
+                      ? DecorationImage(
+                    image: NetworkImage(_profile!.photoUrl!),
+                    fit: BoxFit.cover,
+                  )
+                      : null,
                 ),
-                child: const Icon(
+                child: _profile?.photoUrl == null
+                    ? const Icon(
                   Icons.person_outline,
                   size: 24,
-                ),
+                )
+                    : null,
               ),
             ),
           ],
@@ -721,6 +761,16 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _displayName() {
+    // Prefer the Firestore users/{uid} doc's own name (see _profile) -
+    // FirebaseAuth's displayName is only ever set for a Google sign-in,
+    // so an ordinary email/password account used to always fall
+    // through to "Explorer" here even when a real name was on file.
+    final profileName = _profile?.name.trim();
+
+    if (profileName != null && profileName.isNotEmpty) {
+      return profileName.split(' ').first;
+    }
+
     final user =
         FirebaseAuth.instance.currentUser;
 

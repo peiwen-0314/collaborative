@@ -28,11 +28,6 @@ class RealTransitAvailability {
 
   bool get busAvailable => busNearFrom != null && busNearTo != null;
 
-  /// Only counts as a real rail option if both ends are near a station of
-  /// the *same* kind of rail - being near an MRT station at one end and
-  /// only a KTM Komuter station at the other isn't one real trip anyone
-  /// could actually ride end to end without an extra transfer this app
-  /// doesn't model.
   bool get railAvailable =>
       railNearFrom != null &&
       railNearTo != null &&
@@ -42,18 +37,6 @@ class RealTransitAvailability {
   TransportMode? get railMode => railAvailable ? railModeNearFrom : null;
 }
 
-/// Finds real, community-mapped bus stops and rail stations (MRT/LRT/
-/// monorail vs KTM Komuter, distinguished by OSM's `station` tag) near a
-/// From/To pair, via OpenStreetMap's free, keyless Overpass API.
-///
-/// This is the same data source and approach as OsmBikeShareService,
-/// generalised to the other scheduled modes: "Bus"/"MRT"/"KTM Komuter"
-/// should only ever be offered as a route option when there's a genuine
-/// stop/station within walking distance of BOTH ends to actually board
-/// and alight at - not because the two points happen to fall inside some
-/// distance bracket that "usually has a bus". See
-/// `MockTransportRepository._templatesFor` for how this feeds the offline
-/// combination generator.
 class RealTransitStopService {
   RealTransitStopService({http.Client? client}) : _client = client ?? http.Client();
 
@@ -61,12 +44,6 @@ class RealTransitStopService {
 
   static const _overpassUrl = 'https://overpass-api.de/api/interpreter';
 
-  /// How far someone is assumed willing to walk to/from a bus stop or
-  /// rail station. Deliberately tighter than OsmBikeShareService's 1.2km
-  /// bike-dock radius - bus stops in particular are usually far more
-  /// closely spaced in a real network, so a wide radius here would make
-  /// "Bus" look available even when the nearest real stop is an
-  /// unrealistic walk away.
   static const _searchRadiusMeters = 900;
 
   static const _distance = ll.Distance();
@@ -119,10 +96,6 @@ class RealTransitStopService {
           if (tags['highway'] == 'bus_stop' || tags['amenity'] == 'bus_station') {
             busStops.add(LocationPoint(name: name, lat: lat, lng: lon));
           } else if (tags['railway'] == 'station' || tags['railway'] == 'halt') {
-            // `station=subway/light_rail/monorail` covers Malaysia's
-            // MRT/LRT/monorail lines; anything else mapped as a rail
-            // station/halt (usually untagged, or `station=train`) is
-            // treated as KTM Komuter-style heavy rail.
             final stationTag = tags['station'] as String?;
             final mode =
                 (stationTag == 'subway' || stationTag == 'light_rail' || stationTag == 'monorail')

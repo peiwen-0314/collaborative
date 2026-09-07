@@ -33,12 +33,6 @@ class SavedTrip {
   );
 }
 
-/// Every [SavedTrip] that shares the same real from/to pair - e.g. three
-/// different bus-route combinations someone bookmarked for the same
-/// "Well Mart Enterprise -> Jelutong" journey. Lets the Saved List show
-/// one from/to header per real journey, with every route option for it
-/// listed underneath, instead of repeating the same header once per
-/// saved option.
 class SavedTripGroup {
   const SavedTripGroup({
     required this.from,
@@ -54,17 +48,6 @@ class SavedTripGroup {
   final List<SavedTrip> trips;
 }
 
-/// Groups [trips] by identical from/to pair (see [SavedTripGroup]) -
-/// [LocationPoint]'s own `==` already compares name+coordinates, so this
-/// only merges trips that are genuinely the same real journey, never two
-/// different places that just happen to share a display name. Each
-/// group's own trips keep their relative order from [trips].
-///
-/// Group order matches [trips]' own order (by first appearance) unless
-/// [currentLocation] is given, in which case groups are sorted by real
-/// distance from it to the group's `from` point - nearest first, so the
-/// saved trips actually near where the person is right now surface
-/// first instead of in whatever order they happened to be saved.
 List<SavedTripGroup> groupSavedTrips(
   List<SavedTrip> trips, {
   LocationPoint? currentLocation,

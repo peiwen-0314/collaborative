@@ -5,14 +5,6 @@ import '../core/app_theme.dart';
 import '../models/saved_trip_plan.dart';
 import 'plan_transport_page.dart';
 
-/// Lists every one of the signed-in user's saved trip plans (the AI
-/// Trip Planner module's `saved_trip_plans`) that hasn't ended yet - see
-/// TransportController.getActiveSavedPlans. Replaces the old
-/// lightbulb-icon bottom sheet on RideHomePage's header, which only
-/// ever surfaced a single "today" recommendation with nowhere to go
-/// from there. Styled like SavedListPage (a real full page, not a
-/// drawer/sheet) so a person can browse every upcoming trip at once and
-/// pick one to plan transportation for in full - see PlanTransportPage.
 class TripPlansPage extends StatefulWidget {
   const TripPlansPage({super.key});
 
@@ -26,12 +18,6 @@ class _TripPlansPageState extends State<TripPlansPage> {
   List<SavedTripPlan>? _plans;
   String? _error;
 
-  /// Which of [_plans] already have a saved transportation plan (see
-  /// TransportController.plannedTransportPlanIds) - lets each
-  /// [_PlanCard] show whether it still needs transport planned or is
-  /// already sorted, instead of the person having to open every plan to
-  /// find out. Empty (not null) until it's actually known, so a plan
-  /// never flashes "planned" before this loads.
   Set<String> _plannedIds = const {};
 
   @override
@@ -48,9 +34,6 @@ class _TripPlansPageState extends State<TripPlansPage> {
         _plans = plans;
         _error = null;
       });
-      // Best-effort, separate from the plans themselves loading - a
-      // failure here just means every card shows as "not planned yet"
-      // rather than blocking the whole list.
       try {
         final plannedIds = await _controller.plannedTransportPlanIds(
           plans.map((plan) => plan.id),
@@ -61,9 +44,6 @@ class _TripPlansPageState extends State<TripPlansPage> {
         debugPrint('[TripPlansPage] planned-status lookup failed: $error');
       }
     } catch (error) {
-      // Surfaced plainly (e.g. "please log in") rather than an empty
-      // list, which would read as "you have no trip plans" even when
-      // the real reason is something fixable.
       if (!mounted) return;
       setState(() => _error = error.toString());
     }
@@ -167,9 +147,6 @@ class _PlanCard extends StatelessWidget {
 
   final SavedTripPlan plan;
 
-  /// Whether this plan already has a saved transportation plan (see
-  /// TripPlansPage._plannedIds) - shown as a small badge so the person
-  /// can tell at a glance which trips still need transport planned.
   final bool transportPlanned;
   final VoidCallback onTap;
 

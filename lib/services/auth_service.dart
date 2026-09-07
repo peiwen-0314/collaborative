@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/user.dart';
 
@@ -172,12 +174,28 @@ class AuthService {
   // LOGOUT
   // ============================================================
   Future<void> logout() async {
+    final bool isGoogleUser = _auth.currentUser?.providerData.any(
+          (info) => info.providerId == 'google.com',
+        ) ??
+        false;
+
     await _auth.signOut();
 
+    // Only a Google-signed-in account ever initialize()'d GoogleSignIn
+    // in the first place (see signInWithGoogle()) - calling signOut()
+    // on it otherwise, especially on web, can hang for a long time
+    // instead of failing fast, which used to leave Logout looking
+    // stuck. The timeout is a second safety net even for a real
+    // Google account, so a flaky network can never block Logout.
+    if (!isGoogleUser) return;
+
     try {
-      await GoogleSignIn.instance.signOut();
+      await GoogleSignIn.instance.signOut().timeout(
+            const Duration(seconds: 5),
+          );
     } catch (_) {
-      // Ignore if user logged in using email/password.
+      // Firebase sign-out above already logged the person out of
+      // EcoTravel - a slow/broken Google sign-out shouldn't block that.
     }
   }
 
@@ -186,5 +204,62 @@ class AuthService {
   // ============================================================
   User? get currentUser {
     return _auth.currentUser;
+  }
+
+  // ============================================================
+  // CURRENT USER PROFILE (Firestore users/{uid} doc)
+  // ============================================================
+  Future<UserModel?> getCurrentUserProfile() async {
+    final User? user = _auth.currentUser;
+    if (user == null) return null;
+
+    final document =
+    await _firestore
+        .collection('users')
+        .doc(user.uid)
+        .get();
+
+    final data = document.data();
+    if (data == null) return null;
+
+    return UserModel.fromMap(data);
+  }
+
+  // ============================================================
+  // PROFILE PICTURE
+  // ============================================================
+  Future<String> uploadProfilePicture(XFile image) async {
+    final User? user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('Please log in to change your profile picture.');
+    }
+
+    final bytes = await image.readAsBytes();
+    final ref = FirebaseStorage.instance.ref('profile_pictures/${user.uid}');
+
+    await ref.putData(
+      bytes,
+      SettableMetadata(contentType: 'image/jpeg'),
+    );
+
+    return ref.getDownloadURL();
+  }
+
+  // ============================================================
+  // UPDATE PROFILE (users/{uid} doc)
+  // ============================================================
+  Future<void> updateProfile({String? name, String? photoUrl}) async {
+    final User? user = _auth.currentUser;
+    if (user == null) {
+      throw StateError('Please log in to update your profile.');
+    }
+
+    final updates = <String, dynamic>{
+      if (name != null) 'name': name,
+      if (photoUrl != null) 'photoUrl': photoUrl,
+    };
+    if (updates.isEmpty) return;
+
+    await _firestore.collection('users').doc(user.uid).update(updates);
   }
 }

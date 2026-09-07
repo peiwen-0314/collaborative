@@ -34,11 +34,15 @@ class LocationRow extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500),
+          child: Tooltip(
+            message: value,
+            waitDuration: const Duration(milliseconds: 400),
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500),
+            ),
           ),
         ),
       ],

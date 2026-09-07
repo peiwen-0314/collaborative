@@ -24,36 +24,11 @@ class TripLeg {
   final DateTime end;
   final bool isTransfer;
 
-  /// This leg's real distance in km, when it's known - set from HERE's
-  /// own `travelSummary.length` for a leg that came from a live API
-  /// response, left null for a leg the offline/calculated generator built
-  /// (see MockTransportRepository), which has no real distance to report,
-  /// only an estimate baked into the whole option's totals. Exists so
-  /// TransportService can splice together new combination options out of
-  /// real single-mode legs (e.g. a real "Bus" leg + the real "Taxi" leg)
-  /// using each leg's own real distance for its cost/CO2 share, instead of
-  /// re-deriving distance from an assumed speed constant.
   final double? distanceKm;
 
-  /// Real section endpoints when the provider returned them. These let the
-  /// native navigator guide a road-capable first/last mile without pretending
-  /// that a bus or train section is a drivable route.
   final LocationPoint? startPoint;
   final LocationPoint? endPoint;
 
-  /// This section's real road/rail geometry, still in HERE's own
-  /// "flexible polyline" encoding - null for a leg the offline/mock
-  /// generator built (no real geometry to report) or one HERE didn't
-  /// return a polyline for. Kept as the RAW encoded string (not decoded
-  /// into points here) alongside the already-decoded points RideOption
-  /// merges into [RideOption.path] - that decoded, app-side copy is what
-  /// RouteMapPage (navigation_page.dart) actually draws with, so a bug
-  /// in this field or in HERE's own encoding can't affect the live map;
-  /// this raw copy is kept for any future use that specifically needs
-  /// HERE's own server-side decoding (e.g. its Map Image API's `line:`
-  /// overlay) instead of this app's own hand-written decoder
-  /// (here_polyline_service.dart, whose own doc comment notes it was
-  /// never confirmed against a real encoded string).
   final String? encodedPolyline;
 
   Duration get duration => end.difference(start);

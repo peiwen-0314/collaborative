@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:image_picker/image_picker.dart';
 
+import '../models/user.dart';
 import '../services/auth_service.dart';
 
 class AuthController {
@@ -57,6 +59,43 @@ class AuthController {
   }
 
   // ============================================================
+  // PASSWORD RULES
+  // At least 8 characters, with an uppercase letter, a lowercase
+  // letter, a number, and a special character - checked in this fixed
+  // order so a person only ever sees one thing to fix at a time
+  // instead of every rule they're missing at once. "Special character"
+  // is anything that isn't a plain letter or digit, so there's no
+  // punctuation list to keep in sync between this check and the hint
+  // shown on RegisterPage.
+  // ============================================================
+  // Single source of truth for every password rule, in the order they
+  // should be shown/checked. RegisterPage renders this live (one row
+  // per rule, each with its own pass/fail icon) as the person types -
+  // see its passwordChecklist field - instead of only ever showing one
+  // aggregate hint.
+  Map<String, bool> passwordRuleChecklist(String password) {
+    return {
+      'At least 8 characters': password.length >= 8,
+      'An uppercase letter': RegExp(r'[A-Z]').hasMatch(password),
+      'A lowercase letter': RegExp(r'[a-z]').hasMatch(password),
+      'A number': RegExp(r'[0-9]').hasMatch(password),
+      'A special character': RegExp(r'[^a-zA-Z0-9]').hasMatch(password),
+    };
+  }
+
+  bool isPasswordValid(String password) =>
+      passwordRuleChecklist(password).values.every((met) => met);
+
+  String? _passwordRuleError(String password) {
+    for (final rule in passwordRuleChecklist(password).entries) {
+      if (!rule.value) {
+        return 'Password must include: ${rule.key}';
+      }
+    }
+    return null;
+  }
+
+  // ============================================================
   // REGISTER
   // ============================================================
   Future<String?> register({
@@ -76,8 +115,9 @@ class AuthController {
       return 'Passwords do not match';
     }
 
-    if (password.length < 6) {
-      return 'Password must contain at least 6 characters';
+    final passwordRuleError = _passwordRuleError(password);
+    if (passwordRuleError != null) {
+      return passwordRuleError;
     }
 
     try {
@@ -262,5 +302,30 @@ class AuthController {
   // ============================================================
   Future<void> logout() async {
     await _authService.logout();
+  }
+
+  // ============================================================
+  // CURRENT USER PROFILE
+  // ============================================================
+  Future<UserModel?> getCurrentUserProfile() async {
+    try {
+      return await _authService.getCurrentUserProfile();
+    } catch (e) {
+      print('GET PROFILE ERROR: $e');
+      return null;
+    }
+  }
+
+  String? get currentUserEmail => _authService.currentUser?.email;
+
+  // ============================================================
+  // PROFILE PICTURE / UPDATE PROFILE
+  // ============================================================
+  Future<String> uploadProfilePicture(XFile image) {
+    return _authService.uploadProfilePicture(image);
+  }
+
+  Future<void> updateProfile({String? name, String? photoUrl}) {
+    return _authService.updateProfile(name: name, photoUrl: photoUrl);
   }
 }

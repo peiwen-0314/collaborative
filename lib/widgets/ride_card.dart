@@ -6,6 +6,24 @@ import '../core/formatters.dart';
 import '../data/transport_data.dart';
 import '../models/ride_option.dart';
 import '../models/transport_mode.dart';
+import '../models/trip_leg.dart';
+
+TransportMode _majorityMode(List<TripLeg> legs) {
+  if (legs.isEmpty) return TransportMode.other;
+  final totalsByMode = <TransportMode, Duration>{};
+  for (final leg in legs) {
+    totalsByMode[leg.mode] = (totalsByMode[leg.mode] ?? Duration.zero) + leg.duration;
+  }
+  var majority = legs.first.mode;
+  var majorityDuration = Duration.zero;
+  for (final entry in totalsByMode.entries) {
+    if (entry.value > majorityDuration) {
+      majority = entry.key;
+      majorityDuration = entry.value;
+    }
+  }
+  return majority;
+}
 
 class RideCard extends StatelessWidget {
   const RideCard({
@@ -14,30 +32,20 @@ class RideCard extends StatelessWidget {
     required this.onTap,
     this.featured = false,
     this.showElapsedFromSearch = true,
+    this.showWaitWarning = true,
   });
 
   final RideOption option;
   final VoidCallback onTap;
   final bool featured;
 
-  /// Hides the "elapsed since search" duration and "Waits ..." warning
-  /// below the arrival time (see _ArrivalInformation) - both exist to
-  /// make a NEAR-TERM search fair to compare (does this option make you
-  /// wait hours before it even starts?), which stops making sense once
-  /// the "search" wasn't just now but a real search made for a specific
-  /// future day as part of a whole-trip plan (see
-  /// TransportController.planTransportationForPlan / PlanTransportPage,
-  /// the only caller that sets this false) - there [option.searchDepartAt]
-  /// is a future planning time, not "now", so "elapsed from search" would
-  /// just be a confusing, sometimes hugely negative, number instead of a
-  /// useful comparison.
   final bool showElapsedFromSearch;
+
+  final bool showWaitWarning;
 
   @override
   Widget build(BuildContext context) {
-    final leadMode = option.legs.isNotEmpty
-        ? option.legs.first.mode
-        : TransportMode.other;
+    final leadMode = _majorityMode(option.legs);
 
     return Material(
       color: Colors.white,
@@ -71,6 +79,7 @@ class RideCard extends StatelessWidget {
               _ArrivalInformation(
                 option: option,
                 showElapsedFromSearch: showElapsedFromSearch,
+                showWaitWarning: showWaitWarning,
               ),
               const SizedBox(width: 5),
               const Icon(
@@ -91,18 +100,43 @@ class _RideInformation extends StatelessWidget {
 
   final RideOption option;
 
+  static const _hiddenTags = {'AI Recommended', 'Live Route'};
+
+  /// True for a tag that's actually worth a caution - see MiniChip's
+  /// own `warning` usage a few lines below for the exact same list.
+  static bool _isWarningTag(String tag) =>
+      tag == kRainBikeTag ||
+      tag == kWalkOnlyLongTag ||
+      tag == kHazeOutdoorTag ||
+      tag == kExtremeHeatTag ||
+      tag == kOverBudgetTag ||
+      tag == kOverDurationTag;
+
+  static List<String> _pickShownTags(List<String> tags) {
+    final visible = tags.where((tag) => !_hiddenTags.contains(tag)).toList();
+    final sorted = [
+      ...visible.where(_isWarningTag),
+      ...visible.where((tag) => !_isWarningTag(tag)),
+    ];
+    return sorted.take(3).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final shownTags = option.tags.take(3).toList();
+    final shownTags = _pickShownTags(option.tags);
     final transferChip = transferCountLabel(option.transferCount);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          option.routeSummary,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        Tooltip(
+          message: option.routeSummary,
+          waitDuration: const Duration(milliseconds: 400),
+          child: Text(
+            option.routeSummary,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
         ),
         const SizedBox(height: 7),
         Wrap(
@@ -110,17 +144,18 @@ class _RideInformation extends StatelessWidget {
           runSpacing: 3,
           children: [
             MiniChip(transferChip),
-            // Always shown (not part of shownTags' take(3) crop) - a
-            // possible-delay warning matters more than an ordinary badge
-            // like "Low Carbon", so it shouldn't be the one silently cut
-            // off the end of a long tag list. Estimated only, never a
-            // live feed - see DelayEstimate's own doc comment.
             if (option.delayEstimate != null)
               MiniChip(option.delayEstimate!.chipLabel, warning: true),
             for (final tag in shownTags)
               MiniChip(
                 tag,
-                warning: tag == kRainBikeTag || tag == kWalkOnlyLongTag,
+                warning:
+                    tag == kRainBikeTag ||
+                    tag == kWalkOnlyLongTag ||
+                    tag == kHazeOutdoorTag ||
+                    tag == kExtremeHeatTag ||
+                    tag == kOverBudgetTag ||
+                    tag == kOverDurationTag,
               ),
           ],
         ),
@@ -129,11 +164,6 @@ class _RideInformation extends StatelessWidget {
           children: [
             Image.asset(AppAssets.leaf, width: 12, height: 12),
             const SizedBox(width: 3),
-            // One line instead of two separate labels - the level word
-            // and the exact figure are the same fact at two precisions,
-            // not two different facts, so they don't need their own
-            // separate text runs (previously "Low" and "CO2 0.42kg" sat
-            // side by side as if they were unrelated).
             Text(
               '${option.co2Level} CO₂ · ${option.co2Kg.toStringAsFixed(2)}kg',
               style: const TextStyle(fontSize: 8, color: AppColors.muted),
@@ -149,62 +179,61 @@ class _ArrivalInformation extends StatelessWidget {
   const _ArrivalInformation({
     required this.option,
     this.showElapsedFromSearch = true,
+    this.showWaitWarning = true,
   });
 
   final RideOption option;
   final bool showElapsedFromSearch;
+
+  /// See RideCard.showWaitWarning's doc comment.
+  final bool showWaitWarning;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Shown first because it's the number that actually varies between
-        // options now - a bus/train doesn't run at any hour you happen to
-        // search, so different options can genuinely depart at different
-        // real times (sometimes even the next day) rather than all
-        // starting the instant you searched.
-        const Text(
-          'Departs',
-          style: TextStyle(fontSize: 6.5, color: AppColors.muted),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          formatClockTime(option.departTime),
-          style: const TextStyle(
-            fontSize: 10,
-            color: AppColors.text,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Est. Arrival',
-          style: TextStyle(fontSize: 6.5, color: AppColors.muted),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          formatClockTime(option.arriveTime),
-          style: const TextStyle(fontSize: 10, color: AppColors.green),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.circle, size: 7, color: AppColors.green),
+            const SizedBox(width: 4),
+            Text(
+              formatClockTime(option.departTime),
+              style: const TextStyle(
+                fontSize: 10,
+                color: AppColors.text,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 4),
-        // totalElapsedFromSearch, NOT totalDuration: the latter only
-        // measures this option's own timeline once it starts, which for a
-        // real scheduled service that won't run again for a while makes it
-        // look deceptively as fast as something you could start on right
-        // now. This is the fair, comparable-across-options number - see
-        // RideOption.searchDepartAt's doc comment.
+        // Same idea for "Est. Arrival" - the orange pin LocationRow
+        // marks its own "To" row with.
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.location_on,
+              size: 9,
+              color: AppColors.orange,
+            ),
+            const SizedBox(width: 3),
+            Text(
+              formatClockTime(option.arriveTime),
+              style: const TextStyle(fontSize: 10, color: AppColors.green),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
         if (showElapsedFromSearch) ...[
           Text(
             formatDuration(option.totalElapsedFromSearch),
             style: const TextStyle(fontSize: 7.5),
           ),
-          // Only shown when it's actually worth calling out - a couple
-          // of minutes' rounding is normal and not worth a warning
-          // line, but a real multi-hour gap before a scheduled service
-          // even starts running needs to be visible, not hidden inside
-          // a duration number that reads as "fast" at a glance.
-          if (option.waitBeforeDeparture > const Duration(minutes: 15))
+          if (showWaitWarning &&
+              option.waitBeforeDeparture > const Duration(minutes: 15))
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
@@ -226,11 +255,6 @@ class MiniChip extends StatelessWidget {
 
   final String label;
 
-  /// True for a chip that should stand out as a caution rather than
-  /// blend in as a neutral fact (right now, only [kRainBikeTag]) -
-  /// styled orange instead of the usual neutral grey so a rainy-day
-  /// "don't ideally bike this" warning doesn't read as just another
-  /// badge like "Low Carbon" or "Real Bike Station".
   final bool warning;
 
   @override
