@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../controllers/attraction_controller.dart';
@@ -95,8 +96,8 @@ class _AttractionManagementPageState
             },
 
             onCulturalHeritageTap: () {
-              // Cultural information is managed inside
-              // Attraction Management.
+              // Cultural & Heritage information is managed inside
+              // Attraction Management in the unified admin flow.
             },
 
             onStampTap: () {},
@@ -1987,6 +1988,45 @@ class _AttractionManagementPageState
   }
 
   // ============================================================
+  // DELETE LINKED CULTURAL & HERITAGE INFORMATION
+  //
+  // heritage_attractions stores the master attraction document ID
+  // in its `attractionId` field.
+  // ============================================================
+
+  Future<void> _deleteLinkedHeritageInformation(
+      String attractionId,
+      ) async {
+    final cleanId = attractionId.trim();
+
+    if (cleanId.isEmpty) {
+      return;
+    }
+
+    final firestore = FirebaseFirestore.instance;
+
+    final snapshot = await firestore
+        .collection('heritage_attractions')
+        .where(
+      'attractionId',
+      isEqualTo: cleanId,
+    )
+        .get();
+
+    if (snapshot.docs.isEmpty) {
+      return;
+    }
+
+    final batch = firestore.batch();
+
+    for (final document in snapshot.docs) {
+      batch.delete(document.reference);
+    }
+
+    await batch.commit();
+  }
+
+  // ============================================================
   // DELETE
   // ============================================================
 
@@ -2040,7 +2080,8 @@ class _AttractionManagementPageState
 
               content:
               Text(
-                'Are you sure you want to delete "${attraction.name}"?',
+                'Are you sure you want to delete "${attraction.name}"? '
+                    'Its linked Cultural & Heritage information will also be deleted.',
               ),
 
               actions: [
@@ -2130,6 +2171,38 @@ class _AttractionManagementPageState
                         return;
                       }
 
+                      try {
+                        await _deleteLinkedHeritageInformation(
+                          attraction.id,
+                        );
+                      } catch (error) {
+                        if (!mounted) {
+                          return;
+                        }
+
+                        setDialogState(
+                              () {
+                            isDeleting =
+                            false;
+                          },
+                        );
+
+                        ScaffoldMessenger.of(
+                          context,
+                        ).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Attraction deleted, but linked Cultural & '
+                                  'Heritage information could not be deleted: '
+                                  '$error',
+                            ),
+                          ),
+                        );
+
+                        await _controller.loadData();
+                        return;
+                      }
+
                       Navigator.pop(
                         dialogContext,
                       );
@@ -2147,7 +2220,7 @@ class _AttractionManagementPageState
                         const SnackBar(
                           content:
                           Text(
-                            'Attraction deleted successfully.',
+                            'Attraction and linked Cultural & Heritage information deleted successfully.',
                           ),
                         ),
                       );
