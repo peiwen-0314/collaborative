@@ -2,6 +2,7 @@ import 'package:collaborative_asg/views/attraction_management_page.dart';
 import 'package:collaborative_asg/views/category_management_page.dart';
 import 'package:flutter/material.dart';
 
+import 'admin_moderation_page.dart';
 import 'admin_sidebar.dart';
 
 class AdminHomePage extends StatelessWidget {
@@ -48,6 +49,15 @@ class AdminHomePage extends StatelessWidget {
                 MaterialPageRoute(
                   builder: (context) =>
                   const CategoryManagementPage(),
+                ),
+              );
+            },
+
+            onModerationTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const AdminModerationPage(),
                 ),
               );
             },
@@ -184,6 +194,22 @@ class AdminHomePage extends StatelessWidget {
                                 MaterialPageRoute(
                                   builder: (context) =>
                                   const AttractionManagementPage(),
+                                ),
+                              );
+                            },
+                          ),
+
+                          dashboardCard(
+                            icon: Icons.shield_outlined,
+                            title: 'Content Moderation',
+                            description:
+                            'Review, hide or remove community posts and attraction reviews.',
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                  const AdminModerationPage(),
                                 ),
                               );
                             },
