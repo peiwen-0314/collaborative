@@ -18,6 +18,7 @@ import 'trip_details_page.dart';
 import 'trip_plans_page.dart';
 import 'ai_trip_planner_page.dart';
 import 'home_page.dart';
+import 'community_feed_page.dart';
 
 class TransportationPage extends StatefulWidget {
   const TransportationPage({super.key});
