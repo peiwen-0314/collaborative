@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
+import 'gamification_home_page.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/home_controller.dart';
 import '../controllers/personalization_controller.dart';
@@ -1319,7 +1319,14 @@ class _HomePageState extends State<HomePage> {
               const Color(
                 0xFFEDE5FA,
               ),
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const GamificationHomePage(),
+                  ),
+                );
+              },
             ),
           ),
 

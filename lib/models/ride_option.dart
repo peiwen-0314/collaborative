@@ -76,6 +76,16 @@ class RideOption {
       if (!leg.isTransfer && leg.mode != TransportMode.walk) leg.mode,
   };
 
+  double get totalDistanceKm {
+    var total = 0.0;
+
+    for (final leg in legs) {
+      total += leg.distanceKm ?? 0;
+    }
+
+    return total;
+  }
+
   double? get co2RatePerKm {
     var totalKm = 0.0;
     for (final leg in legs) {

@@ -10,6 +10,29 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  Future<void> _ensureGamificationProfile(User user) async {
+    final gamificationRef =
+    _firestore.collection('gamification').doc(user.uid);
+
+    final snapshot = await gamificationRef.get();
+
+    // Do not overwrite existing gamification data.
+    if (snapshot.exists) return;
+
+    await gamificationRef.set({
+      'level': 1,
+      'levelTitle': 'Eco Explorer',
+      'currentXp': 0,
+      'requiredXp': 1000,
+      'totalPoints': 0,
+      'collectedStamps': 0,
+      'completedChallenges': 0,
+      'carbonSaved': 0.0,
+      'treeGrowth': 0.0,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   // ============================================================
   // EMAIL / PASSWORD LOGIN
   // ============================================================
@@ -23,7 +46,13 @@ class AuthService {
       password: password.trim(),
     );
 
-    return credential.user;
+    final user = credential.user;
+
+    if (user != null) {
+      await _ensureGamificationProfile(user);
+    }
+
+    return user;
   }
 
   // ============================================================
@@ -54,7 +83,9 @@ class AuthService {
           .collection('users')
           .doc(firebaseUser.uid)
           .set(newUser.toMap());
+      await _ensureGamificationProfile(firebaseUser);
     }
+
 
     return firebaseUser;
   }
@@ -113,6 +144,8 @@ class AuthService {
           newUser.toMap(),
         );
       }
+
+      await _ensureGamificationProfile(firebaseUser);
     }
 
     return firebaseUser;

@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'views/admin_login_page.dart';
 import 'views/login_page.dart';
+import 'widgets/attraction_detection_listener.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,12 +17,16 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
+final GlobalKey<NavigatorState> navigatorKey =
+GlobalKey<NavigatorState>();
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'EcoTravel',
 
@@ -32,10 +37,15 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
       ),
 
-      // Temporary: directly open Admin Login
+      builder: (context, child) {
+        return AttractionDetectionListener(
+          navigatorKey: navigatorKey,
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
+
       home: const LoginPage(),
       // home: const AdminLoginPage(),
-      //home: const TransportationPage(),
     );
   }
 }
