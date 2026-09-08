@@ -17,7 +17,6 @@ import '../widgets/ride_card.dart';
 import '../widgets/travel_preferences_sheet.dart';
 import 'saved_list_page.dart';
 import 'trip_details_page.dart';
-import 'trip_plans_page.dart';
 import 'ai_trip_planner_page.dart';
 import 'home_page.dart';
 import 'community_feed_page.dart';
@@ -287,12 +286,6 @@ class _TransportationPageState extends State<TransportationPage> {
     );
   }
 
-  void _openTripPlans() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const TripPlansPage()));
-  }
-
   void _swap() {
     if (_from == null && _to == null) return;
     setState(() {
@@ -466,14 +459,6 @@ class _TransportationPageState extends State<TransportationPage> {
                           ),
                         ),
                         const Spacer(),
-                        IconButton(
-                          onPressed: _openTripPlans,
-                          tooltip: 'My Trip Plans',
-                          icon: const Icon(
-                            Icons.event_note_outlined,
-                            color: AppColors.green,
-                          ),
-                        ),
                         IconButton(
                           onPressed: _openSavedList,
                           tooltip: 'Saved trips',

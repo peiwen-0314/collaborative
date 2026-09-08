@@ -4,10 +4,18 @@ import 'package:flutter/material.dart';
 
 import '../controllers/ai_trip_planner_controller.dart';
 import '../controllers/personalization_controller.dart';
+import '../controllers/transport_controller.dart';
+import '../core/formatters.dart';
 import '../models/attraction.dart';
+import '../models/location_point.dart';
+import '../models/ride_option.dart';
+import '../models/saved_trip_plan.dart';
+import '../models/transport_mode.dart';
 import '../models/trip_schedule_item.dart';
+import '../services/location_service.dart';
 import 'attraction_detail_page.dart';
 import 'ai_trip_planner_page.dart';
+import 'trip_details_page.dart';
 import 'trip_location_date_page.dart';
 
 class GeneratedTripPage extends StatefulWidget {
@@ -38,13 +46,49 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
 
   bool _hasRecordedGeneratedPreferences = false;
 
+  // Real transportation, computed automatically the moment this page
+  // opens (see _computeTransport) using the same engine as the
+  // transportation module's own "Plan Transportation" flow
+  // (TransportController.planTransportationForPlan) - replaces the
+  // HERE-routing-based estimate this page used to compute for itself
+  // (TripScheduleItem.transportMinutesBefore etc, still kept as raw
+  // schedule data but no longer shown as the "estimate").
+  final TransportController _transportController = TransportController();
+  final LocationService _locationService = const LocationService();
+  List<PlannedPlanLeg>? _transportLegs;
+  Map<String, PlannedPlanLeg> _legsByKey = {};
+  Map<String, int> _legIndexByKey = {};
+  final Set<int> _retryingLegs = {};
+  bool _transportLoading = false;
+  bool _transportInitialComputeDone = false;
+  String? _transportError;
+  double _totalTransportCo2Kg = 0;
+
+  /// Sum of every planned leg's real transport fare - see _summary(),
+  /// which folds this into the budget check so "within budget" means
+  /// attractions AND getting to them, not just attractions.
+  double get _totalTransportCostRm {
+    final legs = _transportLegs;
+    if (legs == null) return 0;
+    var total = 0.0;
+    for (final leg in legs) {
+      final cost = leg.option?.estCostRm;
+      if (cost != null) total += cost;
+    }
+    return total;
+  }
+
+  static String _legKey(int day, String attractionName) =>
+      '$day::$attractionName';
+
   @override
   void initState() {
     super.initState();
 
-    WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _recordGeneratedTripPreferences(),
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _recordGeneratedTripPreferences();
+      _computeTransport();
+    });
   }
 
   Future<void> _recordGeneratedTripPreferences() async {
@@ -65,6 +109,331 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     );
   }
 
+  /// Plans real transportation for every stop in this itinerary, using
+  /// the transportation module's own engine
+  /// (TransportController.planTransportationForPlan) - the same one
+  /// the (now removed) manual "Plan Transportation" flow used. Runs
+  /// automatically as soon as this page opens, before the person
+  /// presses Save, so it needs their current location right away.
+  Future<void> _computeTransport() async {
+    if (_transportLoading) return;
+
+    setState(() {
+      _transportLoading = true;
+      _transportError = null;
+    });
+
+    try {
+      final preferences = widget.controller.preferences;
+      final totalDays =
+          preferences.totalDays <= 0 ? 1 : preferences.totalDays;
+
+      final attractions = <SavedTripPlanAttraction>[];
+      for (var dayIndex = 0; dayIndex < totalDays; dayIndex++) {
+        for (final attraction
+            in widget.controller.attractionsForDay(dayIndex)) {
+          attractions.add(
+            SavedTripPlanAttraction(
+              name: attraction.name,
+              address: attraction.address,
+              area: attraction.area,
+              day: dayIndex + 1,
+              openingTime: attraction.openingTime,
+              closingTime: attraction.closingTime,
+              recommendedDuration: attraction.recommendedDuration,
+            ),
+          );
+        }
+      }
+
+      if (attractions.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _transportLoading = false;
+          _transportInitialComputeDone = true;
+        });
+        return;
+      }
+
+      // In-memory only (id: '') - this plan may not be saved to
+      // Firestore yet. planTransportationForPlan never reads plan.id,
+      // only the fields set here, so this is safe.
+      final plan = SavedTripPlan(
+        id: '',
+        selectedState: preferences.selectedState,
+        startDate: preferences.startDate ?? DateTime.now(),
+        endDate: preferences.endDate ?? DateTime.now(),
+        dateSummary: preferences.dateSummary,
+        totalDays: totalDays,
+        totalAttractions: attractions.length,
+        travelStyle: preferences.travelStyles.isNotEmpty
+            ? preferences.travelStyles.first
+            : null,
+        attractions: attractions,
+      );
+
+      final locationResult = await _locationService.detectCurrentLocation();
+      if (!mounted) return;
+
+      final startingFrom = locationResult.point;
+      if (startingFrom == null) {
+        setState(() {
+          _transportLoading = false;
+          _transportInitialComputeDone = true;
+          _transportError =
+              "Couldn't detect your current location, so real "
+              'transportation routes could not be planned for this trip.';
+        });
+        return;
+      }
+
+      final legs = await _transportController.planTransportationForPlan(
+        plan,
+        startingFrom: startingFrom,
+      );
+      if (!mounted) return;
+
+      final legsByKey = <String, PlannedPlanLeg>{};
+      final legIndexByKey = <String, int>{};
+      var totalCo2 = 0.0;
+      for (var i = 0; i < legs.length; i++) {
+        final leg = legs[i];
+        final key = _legKey(leg.day, leg.attractionName);
+        legsByKey[key] = leg;
+        legIndexByKey[key] = i;
+        final co2 = leg.option?.co2Kg;
+        if (co2 != null) totalCo2 += co2;
+      }
+
+      setState(() {
+        _transportLegs = legs;
+        _legsByKey = legsByKey;
+        _legIndexByKey = legIndexByKey;
+        _totalTransportCo2Kg = totalCo2;
+        _transportLoading = false;
+        _transportInitialComputeDone = true;
+      });
+    } catch (error) {
+      debugPrint('[GeneratedTripPage] transport planning failed: $error');
+      if (!mounted) return;
+      setState(() {
+        _transportLoading = false;
+        _transportInitialComputeDone = true;
+        _transportError = 'Could not plan transportation for this trip.';
+      });
+    }
+  }
+
+  /// Opens the same detail/edit page the (now removed) manual "Plan
+  /// Transportation" flow used for one leg - lets the person change
+  /// the starting point or pick a different route, same as before.
+  void _openLegDetail(int index) {
+    final legs = _transportLegs;
+    if (legs == null || index < 0 || index >= legs.length) return;
+    final leg = legs[index];
+    final option = leg.option;
+    final to = leg.to;
+    if (option == null || to == null) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TripDetailsPage(
+          from: leg.from,
+          to: to,
+          option: option,
+          allowTimeChange: true,
+          isPlanLeg: true,
+          onChangeFrom: (query) => _searchAndRetryLeg(index, query),
+          onAutoDetectFrom: () => _detectAndRetryLeg(index),
+          onSaveEditedLeg: (editedOption) => _saveEditedLeg(index, editedOption),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _persistLegsIfSaved() async {
+    final planId = _savedPlanId;
+    final legs = _transportLegs;
+    if (!_isSaved || planId == null || legs == null) return;
+    try {
+      await _transportController.saveTransportPlan(planId, legs);
+    } catch (error) {
+      debugPrint(
+        '[GeneratedTripPage] re-saving transport plan failed: $error',
+      );
+    }
+  }
+
+  void _replaceLeg(int index, PlannedPlanLeg updated) {
+    final legs = _transportLegs;
+    if (legs == null || index < 0 || index >= legs.length) return;
+
+    final newLegs = List<PlannedPlanLeg>.from(legs);
+    newLegs[index] = updated;
+
+    final newByKey = Map<String, PlannedPlanLeg>.from(_legsByKey);
+    newByKey[_legKey(updated.day, updated.attractionName)] = updated;
+
+    var totalCo2 = 0.0;
+    for (final leg in newLegs) {
+      final co2 = leg.option?.co2Kg;
+      if (co2 != null) totalCo2 += co2;
+    }
+
+    setState(() {
+      _transportLegs = newLegs;
+      _legsByKey = newByKey;
+      _totalTransportCo2Kg = totalCo2;
+    });
+  }
+
+  Future<void> _saveEditedLeg(int index, RideOption option) async {
+    final legs = _transportLegs;
+    if (legs == null || index < 0 || index >= legs.length) return;
+    _replaceLeg(index, legs[index].withOption(option));
+    await _persistLegsIfSaved();
+  }
+
+  /// Rebuilds the same SavedTripPlanAttraction _computeTransport would
+  /// have built for this leg, so retryPlanLeg can be called for just
+  /// this one stop instead of recomputing the whole itinerary.
+  SavedTripPlanAttraction? _attractionForLeg(PlannedPlanLeg leg) {
+    final preferences = widget.controller.preferences;
+    final totalDays =
+        preferences.totalDays <= 0 ? 1 : preferences.totalDays;
+    final dayIndex = leg.day - 1;
+    if (dayIndex < 0 || dayIndex >= totalDays) return null;
+
+    for (final attraction in widget.controller.attractionsForDay(dayIndex)) {
+      if (attraction.name == leg.attractionName) {
+        return SavedTripPlanAttraction(
+          name: attraction.name,
+          address: attraction.address,
+          area: attraction.area,
+          day: leg.day,
+          openingTime: attraction.openingTime,
+          closingTime: attraction.closingTime,
+          recommendedDuration: attraction.recommendedDuration,
+        );
+      }
+    }
+    return null;
+  }
+
+  Future<PlannedPlanLeg?> _applyRetriedLeg(
+    int index,
+    LocationPoint from,
+  ) async {
+    final legs = _transportLegs;
+    if (legs == null || index < 0 || index >= legs.length) return null;
+    final leg = legs[index];
+    final attraction = _attractionForLeg(leg);
+    if (attraction == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not find this attraction in the itinerary anymore.',
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+
+    final earliestDepart = index > 0
+        ? legs[index - 1].visitEnd
+        : leg.visitStart.subtract(const Duration(hours: 3));
+
+    setState(() => _retryingLegs.add(index));
+    try {
+      final updated = await _transportController.retryPlanLeg(
+        from: from,
+        attraction: attraction,
+        day: leg.day,
+        visitStart: leg.visitStart,
+        visitEnd: leg.visitEnd,
+        earliestDepart: earliestDepart,
+      );
+      if (!mounted) return updated;
+      _replaceLeg(index, updated);
+      setState(() => _retryingLegs.remove(index));
+      await _persistLegsIfSaved();
+      return updated;
+    } catch (error) {
+      if (!mounted) return null;
+      setState(() => _retryingLegs.remove(index));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Retry failed: $error')));
+      return null;
+    }
+  }
+
+  /// Plain retry - same starting point as before, in case the earlier
+  /// failure was just a transient search/network hiccup.
+  Future<void> _retryLegTap(int index) {
+    final legs = _transportLegs;
+    if (legs == null || index < 0 || index >= legs.length) {
+      return Future<void>.value();
+    }
+    return _applyRetriedLeg(index, legs[index].from).then((_) {});
+  }
+
+  Future<PlannedPlanLeg?> _searchAndRetryLeg(int index, String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return null;
+    final point = await _locationService.searchPlace(trimmed);
+    if (!mounted || point == null) return null;
+    return _applyRetriedLeg(index, point);
+  }
+
+  Future<PlannedPlanLeg?> _detectAndRetryLeg(int index) async {
+    final result = await _locationService.detectCurrentLocation();
+    if (!mounted) return null;
+    final point = result.point;
+    if (point == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Couldn't get your location - search a starting point instead.",
+          ),
+        ),
+      );
+      return null;
+    }
+    return _applyRetriedLeg(index, point);
+  }
+
+  Widget _transportBannerIcon() {
+    if (_transportLoading) {
+      return const SizedBox(
+        width: 14,
+        height: 14,
+        child: CircularProgressIndicator(strokeWidth: 1.6, color: mainGreen),
+      );
+    }
+    if (_transportError != null) {
+      return const Icon(Icons.error_outline, size: 14, color: Colors.orange);
+    }
+    return const Icon(Icons.route_outlined, size: 14, color: mainGreen);
+  }
+
+  String _transportBannerText() {
+    if (_transportLoading) {
+      return 'Planning real transportation routes for every stop, based '
+          'on your current location...';
+    }
+    final error = _transportError;
+    if (error != null) return error;
+    if (_transportLegs != null) {
+      return 'Real transportation planned for every stop - total '
+          'transport CO2: ${_totalTransportCo2Kg.toStringAsFixed(2)} kg.';
+    }
+    return 'Daily stop sequence optimized for a sustainable, walkable '
+        'route.';
+  }
+
   @override
   void dispose() {
     _personalizationController.dispose();
@@ -73,6 +442,10 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_transportInitialComputeDone) {
+      return _buildTransportLoadingScreen();
+    }
+
     final int days = widget.controller.preferences.totalDays <= 0
         ? 1
         : widget.controller.preferences.totalDays;
@@ -150,24 +523,34 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
                           color: const Color(0xFFF5F7F5),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Row(
+                        child: Row(
                           children: [
-                            Icon(
-                              Icons.route_outlined,
-                              size: 14,
-                              color: mainGreen,
-                            ),
-                            SizedBox(width: 6),
+                            _transportBannerIcon(),
+                            const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                'Daily stop sequence optimized using HERE travel-time matrix, then refined with live route estimates.',
-                                style: TextStyle(
+                                _transportBannerText(),
+                                style: const TextStyle(
                                   fontSize: 7.5,
                                   color: textGrey,
                                   height: 1.25,
                                 ),
                               ),
                             ),
+                            if (_transportError != null) ...[
+                              const SizedBox(width: 6),
+                              InkWell(
+                                onTap: _computeTransport,
+                                child: const Text(
+                                  'Retry',
+                                  style: TextStyle(
+                                    fontSize: 7.5,
+                                    color: mainGreen,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -242,6 +625,57 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     );
   }
 
+  /// Shown instead of the itinerary while the very first transport
+  /// computation is still running, so the person only ever sees the
+  /// finished plan - attractions AND real transportation together -
+  /// rather than a page that opens with transport chips filling in
+  /// one by one.
+  Widget _buildTransportLoadingScreen() {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _returnToPlanner();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(color: mainGreen),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Generating your trip...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    "Please don't exit while we finish generating your "
+                    'trip.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF777777),
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _appBar() {
     return SizedBox(
       height: 50,
@@ -280,16 +714,20 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     final double budget =
         preferences.budget;
 
-    final double estimatedCost =
+    final double attractionCost =
         widget.controller
             .estimatedTotalAttractionCost;
+
+    final double transportCost = _totalTransportCostRm;
+
+    final double estimatedCost = attractionCost + transportCost;
 
     final int places =
         widget.controller
             .generatedAttractions.length;
 
     final bool overBudget =
-        widget.controller.isOverBudget;
+        budget > 0 && estimatedCost > budget;
 
     return Container(
       width: double.infinity,
@@ -323,7 +761,7 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
                   value:
                   'MYR ${_formatMoney(estimatedCost)} / ${_formatMoney(budget)}',
                   label:
-                  'Est. Attraction Cost / Budget',
+                  'Est. Total Cost (+ Transport) / Budget',
                 ),
               ),
               Expanded(
@@ -370,8 +808,8 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
                 Expanded(
                   child: Text(
                     overBudget
-                        ? 'Over budget by MYR ${_formatMoney(widget.controller.budgetDifference)}'
-                        : 'Within budget • MYR ${_formatMoney(widget.controller.remainingBudget < 0 ? 0 : widget.controller.remainingBudget)} remaining',
+                        ? 'Over budget by MYR ${_formatMoney(estimatedCost - budget)}'
+                        : 'Within budget • MYR ${_formatMoney((budget - estimatedCost) < 0 ? 0 : (budget - estimatedCost))} remaining',
                     style: TextStyle(
                       fontSize: 8.5,
                       fontWeight:
@@ -528,62 +966,170 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
               crossAxisAlignment:
               CrossAxisAlignment.start,
               children: [
-                if (scheduleItem
-                    .transportMinutesBefore >
-                    0) ...[
-                  Container(
-                    margin:
-                    const EdgeInsets.only(
-                      bottom: 7,
-                    ),
-                    padding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color:
-                      const Color(0xFFF5F7F5),
-                      borderRadius:
-                      BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize:
-                      MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.directions_car_outlined,
-                          size: 12,
-                          color: mainGreen,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${scheduleItem.transportMinutesBefore} min'
-                              ' • '
-                              '${scheduleItem.distanceFromPreviousKm.toStringAsFixed(1)} km',
-                          style:
-                          const TextStyle(
-                            fontSize: 7.5,
-                            color: mainGreen,
-                            fontWeight:
-                            FontWeight.w600,
+                Builder(
+                  builder: (context) {
+                    final key = _legKey(
+                      scheduleItem.dayNumber,
+                      scheduleItem.attraction.name,
+                    );
+                    final leg = _legsByKey[key];
+                    final legIndex = _legIndexByKey[key];
+                    final option = leg?.option;
+                    final retrying =
+                        legIndex != null && _retryingLegs.contains(legIndex);
+
+                    if (option != null) {
+                      final mode = _dominantLegMode(option);
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: legIndex == null
+                            ? null
+                            : () => _openLegDetail(legIndex),
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 7),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF5F7F5),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              transportModeGlyph(
+                                mode,
+                                size: 12,
+                                color: mainGreen,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '${formatDuration(option.totalDuration)}'
+                                    ' • '
+                                    '${option.co2Kg.toStringAsFixed(2)} kg CO2',
+                                style: const TextStyle(
+                                  fontSize: 7.5,
+                                  color: mainGreen,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                mode.label,
+                                style: const TextStyle(
+                                  fontSize: 6.5,
+                                  color: textGrey,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 13,
+                                color: mainGreen.withOpacity(0.6),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          scheduleItem.usedHereRouting
-                              ? 'HERE'
-                              : 'estimated',
-                          style:
-                          const TextStyle(
-                            fontSize: 6.5,
-                            color: textGrey,
+                      );
+                    }
+
+                    if (leg != null) {
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: retrying || legIndex == null
+                            ? null
+                            : () => _retryLegTap(legIndex),
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 7),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFF1E0),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: retrying
+                                ? const [
+                                    SizedBox(
+                                      width: 10,
+                                      height: 10,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 1.4,
+                                        color: Colors.orange,
+                                      ),
+                                    ),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      'Retrying...',
+                                      style: TextStyle(
+                                        fontSize: 7.5,
+                                        color: Colors.orange,
+                                      ),
+                                    ),
+                                  ]
+                                : [
+                                    const Icon(
+                                      Icons.error_outline,
+                                      size: 12,
+                                      color: Colors.orange,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'No real route found - tap to retry',
+                                      style: TextStyle(
+                                        fontSize: 7.5,
+                                        color: Colors.orange.shade800,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ],
+                      );
+                    }
+
+                    if (_transportLoading) {
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 7),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F7F5),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 10,
+                              height: 10,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.4,
+                                color: mainGreen,
+                              ),
+                            ),
+                            SizedBox(width: 6),
+                            Text(
+                              'Planning route...',
+                              style: TextStyle(
+                                fontSize: 7.5,
+                                color: textGrey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return const SizedBox.shrink();
+                  },
+                ),
                 InkWell(
                   onTap: () {
                     Navigator.push(
@@ -982,6 +1528,7 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
               .collection('saved_trip_plans')
               .doc(savedId)
               .delete();
+          await _transportController.deleteTransportPlan(savedId);
         }
 
         if (!mounted) return;
@@ -1062,6 +1609,8 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
         'budget': preferences.budget,
         'estimatedAttractionCost':
         widget.controller.estimatedTotalAttractionCost,
+        'totalTransportCo2Kg': _totalTransportCo2Kg,
+        'totalTransportCostRm': _totalTransportCostRm,
         'travelStyles': List<String>.from(preferences.travelStyles),
         'travelStyleSummary': preferences.travelStyleSummary,
         'totalAttractions': attractions.length,
@@ -1069,6 +1618,17 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
         'status': 'saved',
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      final legsToSave = _transportLegs;
+      if (legsToSave != null && legsToSave.isNotEmpty) {
+        try {
+          await _transportController.saveTransportPlan(doc.id, legsToSave);
+        } catch (error) {
+          debugPrint(
+            '[GeneratedTripPage] saving transport plan failed: $error',
+          );
+        }
+      }
 
       if (!mounted) return;
 
@@ -1265,4 +1825,29 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     }
     return value.toStringAsFixed(2);
   }
+}
+
+/// Same "which mode dominates this route" rule as RideCard's own
+/// private _majorityMode (ride_card.dart) - duplicated here (rather
+/// than exported) so this page doesn't need to import a widget file
+/// just for one small pure function.
+TransportMode _dominantLegMode(RideOption option) {
+  final legs = option.legs;
+  if (legs.isEmpty) return TransportMode.other;
+
+  final totalsByMode = <TransportMode, Duration>{};
+  for (final leg in legs) {
+    totalsByMode[leg.mode] =
+        (totalsByMode[leg.mode] ?? Duration.zero) + leg.duration;
+  }
+
+  var majority = legs.first.mode;
+  var majorityDuration = Duration.zero;
+  for (final entry in totalsByMode.entries) {
+    if (entry.value > majorityDuration) {
+      majority = entry.key;
+      majorityDuration = entry.value;
+    }
+  }
+  return majority;
 }

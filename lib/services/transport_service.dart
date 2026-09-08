@@ -47,11 +47,18 @@ class TransportService {
       try {
         _here ??= HereTransitService();
         final here = _here!;
-        var transitOptions = await here.search(
-          from: from,
-          to: to,
-          departAt: departAt,
-        );
+        var transitOptions = const <RideOption>[];
+        try {
+          transitOptions = await here.search(
+            from: from,
+            to: to,
+            departAt: departAt,
+          );
+        } catch (error) {
+          // Ignore - e.g. no public-transit coverage at this location.
+          // Don't let that abort intermodal/bike-share/drive below.
+          debugPrint('[TransportService] transit search failed: $error');
+        }
 
         try {
           transitOptions = await _withAccessAlternatives(

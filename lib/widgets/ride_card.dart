@@ -128,9 +128,16 @@ class _RideInformation extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Tooltip(
-          message: option.routeSummary,
-          waitDuration: const Duration(milliseconds: 400),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(option.routeSummary),
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          },
           child: Text(
             option.routeSummary,
             maxLines: 1,

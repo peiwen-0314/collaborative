@@ -1,4 +1,3 @@
-import 'package:collaborative_asg/views/saved_trip_plans_page.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -15,6 +14,7 @@ import 'home_page.dart';
 import 'login_page.dart';
 import 'ride_home_page.dart';
 import 'my_trip_plans_page.dart';
+import 'saved_trip_plans_page.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -464,7 +464,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
                               color: mainGreen.withOpacity(0.07),
                               borderRadius: BorderRadius.circular(16),

@@ -590,6 +590,10 @@ class TransportController {
 
       var from = startingFrom;
       var freeFrom = DateTime.utc(dayDate.year, dayDate.month, dayDate.day, 9);
+      final nowWallClock = instantToMalaysiaWallClock(DateTime.now());
+      if (freeFrom.isBefore(nowWallClock)) {
+        freeFrom = nowWallClock;
+      }
 
       for (final attraction in dayAttractions) {
         LocationPoint? to;
@@ -651,6 +655,7 @@ class TransportController {
 
         if (to != null) from = to;
         freeFrom = visitEnd.add(Duration(minutes: bufferMinutes));
+        await Future<void>.delayed(const Duration(milliseconds: 300));
       }
     }
 

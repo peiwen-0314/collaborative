@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../controllers/transport_controller.dart';
 import '../core/api_config.dart';
@@ -18,6 +17,7 @@ import '../services/destination_photo_service.dart';
 import '../services/transit_hop_finder.dart';
 import '../widgets/location_row.dart';
 import '../widgets/trip_widgets.dart';
+import 'navigation_page.dart';
 
 List<Widget> _timelineItems(
   List<TripLeg> legs, {
@@ -786,60 +786,17 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     await _loadLegAlternatives();
   }
 
-  // The dominant real (non-transfer) leg decides which Google Maps
-  // travel mode to open with, so the link matches whatever this app
-  // already planned for the trip instead of a generic/blank pick.
-  // Google Maps' deep link only accepts one of these four modes, so a
-  // mixed walk+bus+walk option still opens as 'transit' overall.
-  static String _googleMapsTravelMode(RideOption option) {
-    final realLegs = option.legs.where((leg) => !leg.isTransfer).toList();
-    if (realLegs.isEmpty ||
-        realLegs.every((leg) => leg.mode == TransportMode.walk)) {
-      return 'walking';
-    }
-    final primary = realLegs.firstWhere(
-      (leg) => leg.mode != TransportMode.walk,
-      orElse: () => realLegs.first,
-    );
-    switch (primary.mode) {
-      case TransportMode.bike:
-        return 'bicycling';
-      case TransportMode.taxi:
-        return 'driving';
-      case TransportMode.walk:
-        return 'walking';
-      case TransportMode.train:
-      case TransportMode.mrt:
-      case TransportMode.bus:
-      case TransportMode.ferry:
-      case TransportMode.other:
-        return 'transit';
-    }
-  }
-
-  // Opens the person's own Google Maps app/site with the origin,
-  // destination, and the travel mode this app already planned for the
-  // trip (see _googleMapsTravelMode) - so Google Maps opens straight
-  // into the same kind of route instead of a generic/default one.
+  // Shows this trip's route on the app's own in-app map (no external
+  // app) - see RouteMapPage in navigation_page.dart, which was built
+  // for exactly this: drawing one RideOption's route between two
+  // points.
   Future<void> _startNavigation() async {
-    final uri = Uri.https('www.google.com', '/maps/dir/', {
-      'api': '1',
-      'origin': _from.coordinateString,
-      'destination': widget.to.coordinateString,
-      'travelmode': _googleMapsTravelMode(_option),
-    });
-    try {
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-      if (!launched && mounted) {
-        _showSnack('Could not open Google Maps.', isError: true);
-      }
-    } catch (error) {
-      if (!mounted) return;
-      _showSnack('Could not open Google Maps: $error', isError: true);
-    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            RouteMapPage(from: _from, to: widget.to, option: _option),
+      ),
+    );
   }
 
   Future<void> _changeFrom() async {

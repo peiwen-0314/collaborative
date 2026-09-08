@@ -2,8 +2,37 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../controllers/transport_controller.dart';
+import '../core/formatters.dart';
 import '../models/attraction.dart';
+import '../models/ride_option.dart';
+import '../models/saved_trip_plan.dart';
+import '../models/transport_mode.dart';
+import '../models/location_point.dart';
+import '../services/location_service.dart';
 import 'attraction_detail_page.dart';
+import 'trip_details_page.dart';
+
+TransportMode _dominantLegMode(RideOption option) {
+  final legs = option.legs;
+  if (legs.isEmpty) return TransportMode.other;
+
+  final totalsByMode = <TransportMode, Duration>{};
+  for (final leg in legs) {
+    totalsByMode[leg.mode] =
+        (totalsByMode[leg.mode] ?? Duration.zero) + leg.duration;
+  }
+
+  var majority = legs.first.mode;
+  var majorityDuration = Duration.zero;
+  for (final entry in totalsByMode.entries) {
+    if (entry.value > majorityDuration) {
+      majority = entry.key;
+      majorityDuration = entry.value;
+    }
+  }
+  return majority;
+}
 
 class SavedTripPlansPage extends StatelessWidget {
   const SavedTripPlansPage({super.key});
@@ -601,6 +630,269 @@ class _SavedTripPlanDetailPageState
 
   int selectedDay = 0;
 
+  final TransportController _transportController =
+      TransportController();
+  final LocationService _locationService = const LocationService();
+  Map<String, PlannedPlanLeg> _legsByKey = {};
+  List<PlannedPlanLeg> _legs = [];
+  Map<String, int> _legIndexByKey = {};
+  bool _computingTransport = false;
+  String? _transportError;
+
+  static String _legKey(int day, String attractionName) =>
+      '$day::$attractionName';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTransportLegs();
+  }
+
+  Future<void> _loadTransportLegs() async {
+    List<PlannedPlanLeg>? legs;
+    try {
+      legs = await _transportController.getSavedTransportPlan(
+        widget.planId,
+      );
+    } catch (error) {
+      debugPrint(
+        '[SavedTripPlanDetailPage] loading saved transport failed: '
+        '$error',
+      );
+    }
+
+    if (legs != null && legs.isNotEmpty) {
+      if (!mounted) return;
+      final loadedLegs = legs;
+      setState(() {
+        _legs = loadedLegs;
+        _legsByKey = {
+          for (final leg in loadedLegs)
+            _legKey(leg.day, leg.attractionName): leg,
+        };
+        _legIndexByKey = {
+          for (var i = 0; i < loadedLegs.length; i++)
+            _legKey(loadedLegs[i].day, loadedLegs[i].attractionName): i,
+        };
+      });
+      return;
+    }
+
+    // Nothing saved yet for this plan - most likely it was saved
+    // before real transportation planning existed. Compute it now,
+    // the same way GeneratedTripPage does for a freshly generated
+    // trip, and save it so it's there next time too.
+    if (!mounted) return;
+    setState(() {
+      _computingTransport = true;
+      _transportError = null;
+    });
+    try {
+      final plan =
+          SavedTripPlan.fromFirestore(widget.planId, widget.data);
+      if (plan.attractions.isEmpty) {
+        if (!mounted) return;
+        setState(() => _computingTransport = false);
+        return;
+      }
+
+      final locationResult =
+          await _locationService.detectCurrentLocation();
+      if (!mounted) return;
+
+      final startingFrom = locationResult.point;
+      if (startingFrom == null) {
+        setState(() {
+          _computingTransport = false;
+          _transportError =
+              "Couldn't detect your current location, so real "
+              'transportation routes could not be planned for this '
+              'trip.';
+        });
+        return;
+      }
+
+      final computedLegs =
+          await _transportController.planTransportationForPlan(
+        plan,
+        startingFrom: startingFrom,
+      );
+      if (!mounted) return;
+
+      await _transportController.saveTransportPlan(
+        widget.planId,
+        computedLegs,
+      );
+      if (!mounted) return;
+
+      setState(() {
+        _legs = computedLegs;
+        _legsByKey = {
+          for (final leg in computedLegs)
+            _legKey(leg.day, leg.attractionName): leg,
+        };
+        _legIndexByKey = {
+          for (var i = 0; i < computedLegs.length; i++)
+            _legKey(computedLegs[i].day, computedLegs[i].attractionName): i,
+        };
+        _computingTransport = false;
+      });
+    } catch (error) {
+      debugPrint(
+        '[SavedTripPlanDetailPage] computing transport failed: '
+        '$error',
+      );
+      if (!mounted) return;
+      setState(() {
+        _computingTransport = false;
+        _transportError = 'Could not plan transportation for this '
+            'trip.';
+      });
+    }
+  }
+
+  void _openLegDetail(int index) {
+    if (index < 0 || index >= _legs.length) return;
+    final leg = _legs[index];
+    final option = leg.option;
+    final to = leg.to;
+    if (option == null || to == null) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TripDetailsPage(
+          from: leg.from,
+          to: to,
+          option: option,
+          allowTimeChange: true,
+          isPlanLeg: true,
+          onChangeFrom: (query) => _searchAndRetryLeg(index, query),
+          onAutoDetectFrom: () => _detectAndRetryLeg(index),
+          onSaveEditedLeg: (editedOption) =>
+              _saveEditedLeg(index, editedOption),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _persistLegs() async {
+    try {
+      await _transportController.saveTransportPlan(widget.planId, _legs);
+    } catch (error) {
+      debugPrint(
+        '[SavedTripPlanDetailPage] re-saving transport plan failed: '
+        '$error',
+      );
+    }
+  }
+
+  void _replaceLeg(int index, PlannedPlanLeg updated) {
+    if (index < 0 || index >= _legs.length) return;
+
+    final newLegs = List<PlannedPlanLeg>.from(_legs);
+    newLegs[index] = updated;
+
+    final newByKey = Map<String, PlannedPlanLeg>.from(_legsByKey);
+    newByKey[_legKey(updated.day, updated.attractionName)] = updated;
+
+    setState(() {
+      _legs = newLegs;
+      _legsByKey = newByKey;
+    });
+  }
+
+  Future<void> _saveEditedLeg(int index, RideOption option) async {
+    if (index < 0 || index >= _legs.length) return;
+    _replaceLeg(index, _legs[index].withOption(option));
+    await _persistLegs();
+  }
+
+  /// Rebuilds the SavedTripPlanAttraction this leg was planned for, so
+  /// retryPlanLeg can be called for just this one stop instead of
+  /// recomputing the whole itinerary.
+  SavedTripPlanAttraction? _attractionForLeg(PlannedPlanLeg leg) {
+    final plan = SavedTripPlan.fromFirestore(widget.planId, widget.data);
+    for (final attraction in plan.attractionsForDay(leg.day)) {
+      if (attraction.name == leg.attractionName) return attraction;
+    }
+    return null;
+  }
+
+  Future<PlannedPlanLeg?> _applyRetriedLeg(
+    int index,
+    LocationPoint from,
+  ) async {
+    if (index < 0 || index >= _legs.length) return null;
+    final leg = _legs[index];
+    final attraction = _attractionForLeg(leg);
+    if (attraction == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not find this attraction in the itinerary anymore.',
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+
+    final earliestDepart = index > 0
+        ? _legs[index - 1].visitEnd
+        : leg.visitStart.subtract(const Duration(hours: 3));
+
+    try {
+      final updated = await _transportController.retryPlanLeg(
+        from: from,
+        attraction: attraction,
+        day: leg.day,
+        visitStart: leg.visitStart,
+        visitEnd: leg.visitEnd,
+        earliestDepart: earliestDepart,
+      );
+      if (!mounted) return updated;
+      _replaceLeg(index, updated);
+      await _persistLegs();
+      return updated;
+    } catch (error) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Retry failed: $error')));
+      return null;
+    }
+  }
+
+  Future<PlannedPlanLeg?> _searchAndRetryLeg(
+    int index,
+    String query,
+  ) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return null;
+    final point = await _locationService.searchPlace(trimmed);
+    if (!mounted || point == null) return null;
+    return _applyRetriedLeg(index, point);
+  }
+
+  Future<PlannedPlanLeg?> _detectAndRetryLeg(int index) async {
+    final result = await _locationService.detectCurrentLocation();
+    if (!mounted) return null;
+    final point = result.point;
+    if (point == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Couldn't get your location - search a starting point "
+            'instead.',
+          ),
+        ),
+      );
+      return null;
+    }
+    return _applyRetriedLeg(index, point);
+  }
+
   @override
   Widget build(BuildContext context) {
     final attractions =
@@ -675,6 +967,74 @@ class _SavedTripPlanDetailPageState
             CrossAxisAlignment.start,
             children: [
               _summary(),
+              if (_computingTransport) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: lightGreen,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: mainGreen,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          'Planning real transportation for this '
+                          'trip...',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: mainGreen,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else if (_transportError != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF3E0),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: Colors.orange,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _transportError!,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFF9C6B00),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 14),
               SizedBox(
                 height: 36,
@@ -902,8 +1262,18 @@ class _SavedTripPlanDetailPageState
       Map<String, dynamic> attraction,
       bool last,
       ) {
+    final legLookupKey = _legKey(
+      selectedDay + 1,
+      (attraction['name'] ?? '').toString(),
+    );
+    final leg = _legsByKey[legLookupKey];
+    final legIndex = _legIndexByKey[legLookupKey];
+    final legOption = leg?.option;
+
+    // Prefer the real leg's own computed arrival time - it accounts
+    // for actual travel time, unlike the old saved estimate.
     final start =
-    _timestamp(attraction['startTime']);
+    leg?.visitStart ?? _timestamp(attraction['startTime']);
 
     final end =
     _timestamp(attraction['endTime']);
@@ -994,7 +1364,60 @@ class _SavedTripPlanDetailPageState
               crossAxisAlignment:
               CrossAxisAlignment.start,
               children: [
-                if (transportMinutes != null &&
+                if (legOption != null)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: legIndex == null
+                        ? null
+                        : () => _openLegDetail(legIndex),
+                    child: Container(
+                    margin: const EdgeInsets.only(bottom: 7),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF5F7F5),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        transportModeGlyph(
+                          _dominantLegMode(legOption),
+                          size: 12,
+                          color: mainGreen,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${formatDuration(legOption.totalDuration)}'
+                          ' • '
+                          '${legOption.co2Kg.toStringAsFixed(2)} kg CO2',
+                          style: const TextStyle(
+                            fontSize: 7.5,
+                            color: mainGreen,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _dominantLegMode(legOption).label,
+                          style: const TextStyle(
+                            fontSize: 6.5,
+                            color: secondaryText,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          size: 13,
+                          color: mainGreen.withOpacity(0.6),
+                        ),
+                      ],
+                    ),
+                  ),
+                  )
+                else if (transportMinutes != null &&
                     transportMinutes > 0)
                   Container(
                     margin:

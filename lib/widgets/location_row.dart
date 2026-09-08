@@ -34,9 +34,16 @@ class LocationRow extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: Tooltip(
-            message: value,
-            waitDuration: const Duration(milliseconds: 400),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(value),
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            },
             child: Text(
               value,
               maxLines: 1,
