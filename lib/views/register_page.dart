@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../controllers/auth_controller.dart';
-import 'home_page.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -11,19 +10,30 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  final TextEditingController nameController = TextEditingController();
-  final TextEditingController emailController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
+  final TextEditingController nameController =
+  TextEditingController();
+
+  final TextEditingController emailController =
+  TextEditingController();
+
+  final TextEditingController passwordController =
+  TextEditingController();
+
   final TextEditingController confirmPasswordController =
   TextEditingController();
 
-  final AuthController authController = AuthController();
+  final AuthController authController =
+  AuthController();
 
   bool isLoading = false;
+
   bool hidePassword = true;
   bool hideConfirmPassword = true;
+
   bool passwordFulfilled = false;
-  Map<String, bool> passwordChecklist = const {
+
+  Map<String, bool> passwordChecklist =
+  const {
     'At least 8 characters': false,
     'An uppercase letter': false,
     'A lowercase letter': false,
@@ -31,170 +41,363 @@ class _RegisterPageState extends State<RegisterPage> {
     'A special character': false,
   };
 
-  static const Color mainGreen = Color(0xFF2E7D32);
-  static const Color fulfilledCyan = Color(0xFF00BCD4);
+  static const Color mainGreen =
+  Color(0xFF2E7D32);
+
+  static const Color fulfilledCyan =
+  Color(0xFF00BCD4);
+
+  // ============================================================
+  // INIT
+  // ============================================================
 
   @override
   void initState() {
     super.initState();
-    passwordController.addListener(_checkPasswordFulfilled);
+
+    passwordController.addListener(
+      _checkPasswordFulfilled,
+    );
   }
+
+  // ============================================================
+  // PASSWORD CHECK
+  // ============================================================
 
   void _checkPasswordFulfilled() {
     final checklist =
-        authController.passwordRuleChecklist(passwordController.text);
+    authController.passwordRuleChecklist(
+      passwordController.text,
+    );
+
     setState(() {
       passwordChecklist = checklist;
-      passwordFulfilled = checklist.values.every((met) => met);
+
+      passwordFulfilled =
+          checklist.values.every(
+                (met) => met,
+          );
     });
   }
 
+  // ============================================================
+  // REGISTER
+  // ============================================================
+
   Future<void> register() async {
+    if (isLoading) {
+      return;
+    }
+
     setState(() {
       isLoading = true;
     });
 
-    final String? error = await authController.register(
+    final String? error =
+    await authController.register(
       name: nameController.text,
       email: emailController.text,
       password: passwordController.text,
-      confirmPassword: confirmPasswordController.text,
+      confirmPassword:
+      confirmPasswordController.text,
     );
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
       isLoading = false;
     });
 
+    // ==========================================================
+    // SUCCESS
+    // ==========================================================
+
     if (error == null) {
-      Navigator.pushReplacement(
+      ScaffoldMessenger.of(context)
+          .hideCurrentSnackBar();
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                Icons.check_circle,
+                color: Colors.white,
+              ),
+              SizedBox(
+                width: 10,
+              ),
+              Expanded(
+                child: Text(
+                  'Account registered successfully. Please login.',
+                ),
+              ),
+            ],
+          ),
+          backgroundColor:
+          mainGreen,
+          behavior:
+          SnackBarBehavior.floating,
+          duration:
+          Duration(
+            seconds: 2,
+          ),
+        ),
+      );
+
+      // Give the user time to see the success message.
+      await Future.delayed(
+        const Duration(
+          milliseconds: 1200,
+        ),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      // RegisterPage was opened from LoginPage,
+      // so pop returns directly to LoginPage.
+      Navigator.pop(
         context,
-        MaterialPageRoute(
-          builder: (_) => const HomePage(),
-        ),
       );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error),
-          backgroundColor: Colors.red.shade700,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+
+      return;
     }
+
+    // ==========================================================
+    // ERROR
+    // ==========================================================
+
+    ScaffoldMessenger.of(context)
+        .hideCurrentSnackBar();
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(
+      SnackBar(
+        content: Text(
+          error,
+        ),
+        backgroundColor:
+        Colors.red.shade700,
+        behavior:
+        SnackBarBehavior.floating,
+      ),
+    );
   }
+
+  // ============================================================
+  // DISPOSE
+  // ============================================================
 
   @override
   void dispose() {
-    passwordController.removeListener(_checkPasswordFulfilled);
+    passwordController.removeListener(
+      _checkPasswordFulfilled,
+    );
+
     nameController.dispose();
     emailController.dispose();
     passwordController.dispose();
     confirmPasswordController.dispose();
+
     super.dispose();
   }
 
+  // ============================================================
+  // BUILD
+  // ============================================================
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+      BuildContext context,
+      ) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor:
+      Colors.white,
+
       body: SafeArea(
-        child: SingleChildScrollView(
+        child:
+        SingleChildScrollView(
           child: Column(
             children: [
-
-              // =====================================
+              // ==================================================
               // TOP BACKGROUND SECTION
-              // Same hero treatment as LoginPage, with a back button
-              // overlaid on top since this page is pushed on top of it.
-              // =====================================
+              // ==================================================
+
               SizedBox(
                 height: 430,
-                width: double.infinity,
+                width:
+                double.infinity,
+
                 child: Stack(
-                  fit: StackFit.expand,
+                  fit:
+                  StackFit.expand,
+
                   children: [
                     Image.asset(
                       'assets/images/backgroundImg.png',
-                      fit: BoxFit.cover,
+                      fit:
+                      BoxFit.cover,
                     ),
 
+                    // =============================================
+                    // OVERLAY
+                    // =============================================
+
                     Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
+                      decoration:
+                      BoxDecoration(
+                        gradient:
+                        LinearGradient(
+                          begin:
+                          Alignment.topCenter,
+
+                          end:
+                          Alignment.bottomCenter,
+
                           colors: [
-                            Colors.white.withOpacity(0.10),
-                            Colors.white.withOpacity(0.20),
-                            Colors.white.withOpacity(0.80),
+                            Colors.white
+                                .withOpacity(
+                              0.10,
+                            ),
+
+                            Colors.white
+                                .withOpacity(
+                              0.20,
+                            ),
+
+                            Colors.white
+                                .withOpacity(
+                              0.80,
+                            ),
                           ],
                         ),
                       ),
                     ),
 
+                    // =============================================
+                    // BACK BUTTON
+                    // =============================================
+
                     Positioned(
                       left: 4,
                       top: 4,
-                      child: IconButton(
-                        onPressed: () {
-                          Navigator.pop(context);
+
+                      child:
+                      IconButton(
+                        onPressed:
+                        isLoading
+                            ? null
+                            : () {
+                          Navigator.pop(
+                            context,
+                          );
                         },
-                        icon: const Icon(
-                          Icons.arrow_back_ios_new_rounded,
-                          color: mainGreen,
+
+                        icon:
+                        const Icon(
+                          Icons
+                              .arrow_back_ios_new_rounded,
+
+                          color:
+                          mainGreen,
+
                           size: 20,
                         ),
                       ),
                     ),
 
+                    // =============================================
+                    // BRANDING
+                    // =============================================
+
                     Positioned(
                       left: 30,
                       bottom: 45,
+
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment:
+                        CrossAxisAlignment
+                            .start,
+
                         children: [
                           Row(
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.eco,
                                 size: 55,
-                                color: mainGreen,
+                                color:
+                                mainGreen,
                               ),
-                              const SizedBox(width: 8),
-                              Text(
+
+                              const SizedBox(
+                                width: 8,
+                              ),
+
+                              const Text(
                                 'EcoTravel',
-                                style: TextStyle(
-                                  fontSize: 42,
-                                  fontWeight: FontWeight.bold,
-                                  color: mainGreen,
+
+                                style:
+                                TextStyle(
+                                  fontSize:
+                                  42,
+
+                                  fontWeight:
+                                  FontWeight
+                                      .bold,
+
+                                  color:
+                                  mainGreen,
                                 ),
                               ),
                             ],
                           ),
 
-                          const SizedBox(height: 6),
+                          const SizedBox(
+                            height: 6,
+                          ),
 
-                          Text(
+                          const Text(
                             'Travel Smart, Travel Green',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w500,
-                              color: mainGreen,
+
+                            style:
+                            TextStyle(
+                              fontSize:
+                              18,
+
+                              fontWeight:
+                              FontWeight
+                                  .w500,
+
+                              color:
+                              mainGreen,
                             ),
                           ),
 
-                          const SizedBox(height: 24),
+                          const SizedBox(
+                            height: 24,
+                          ),
 
                           const Text(
                             'Plan sustainable trips,\n'
                                 'explore responsibly,\n'
                                 'and protect our planet.',
-                            style: TextStyle(
-                              fontSize: 17,
-                              height: 1.5,
-                              color: Colors.black87,
+
+                            style:
+                            TextStyle(
+                              fontSize:
+                              17,
+
+                              height:
+                              1.5,
+
+                              color:
+                              Colors
+                                  .black87,
                             ),
                           ),
                         ],
@@ -204,123 +407,275 @@ class _RegisterPageState extends State<RegisterPage> {
                 ),
               ),
 
-              // =====================================
+              // ==================================================
               // REGISTER FORM
-              // =====================================
+              // ==================================================
+
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 28,
+                padding:
+                const EdgeInsets
+                    .symmetric(
+                  horizontal:
+                  28,
                 ),
+
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
+
                   children: [
+                    const SizedBox(
+                      height: 10,
+                    ),
 
-                    const SizedBox(height: 10),
+                    // =============================================
+                    // TITLE
+                    // =============================================
 
-                    Text(
+                    const Text(
                       'Create Account',
-                      style: TextStyle(
+
+                      style:
+                      TextStyle(
                         fontSize: 30,
-                        fontWeight: FontWeight.bold,
-                        color: mainGreen,
+
+                        fontWeight:
+                        FontWeight.bold,
+
+                        color:
+                        mainGreen,
                       ),
                     ),
 
-                    const SizedBox(height: 8),
+                    const SizedBox(
+                      height: 8,
+                    ),
 
                     const Text(
                       'Join EcoTravel and start your sustainable journey.',
-                      style: TextStyle(
+
+                      style:
+                      TextStyle(
                         fontSize: 16,
-                        color: Colors.grey,
+
+                        color:
+                        Colors.grey,
                       ),
                     ),
 
-                    const SizedBox(height: 30),
+                    const SizedBox(
+                      height: 30,
+                    ),
 
-                    // Full Name
+                    // =============================================
+                    // FULL NAME
+                    // =============================================
+
                     TextField(
-                      controller: nameController,
-                      textInputAction: TextInputAction.next,
-                      textCapitalization: TextCapitalization.words,
-                      decoration: inputDecoration(
-                        hint: 'Full Name',
-                        icon: Icons.person_outline,
+                      controller:
+                      nameController,
+
+                      enabled:
+                      !isLoading,
+
+                      textInputAction:
+                      TextInputAction
+                          .next,
+
+                      textCapitalization:
+                      TextCapitalization
+                          .words,
+
+                      decoration:
+                      inputDecoration(
+                        hint:
+                        'Full Name',
+
+                        icon:
+                        Icons
+                            .person_outline,
                       ),
                     ),
 
-                    const SizedBox(height: 18),
+                    const SizedBox(
+                      height: 18,
+                    ),
 
-                    // Email
+                    // =============================================
+                    // EMAIL
+                    // =============================================
+
                     TextField(
-                      controller: emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      textInputAction: TextInputAction.next,
-                      decoration: inputDecoration(
-                        hint: 'Email',
-                        icon: Icons.email_outlined,
+                      controller:
+                      emailController,
+
+                      enabled:
+                      !isLoading,
+
+                      keyboardType:
+                      TextInputType
+                          .emailAddress,
+
+                      textInputAction:
+                      TextInputAction
+                          .next,
+
+                      decoration:
+                      inputDecoration(
+                        hint:
+                        'Email',
+
+                        icon:
+                        Icons
+                            .email_outlined,
                       ),
                     ),
 
-                    const SizedBox(height: 18),
+                    const SizedBox(
+                      height: 18,
+                    ),
 
-                    // Password
+                    // =============================================
+                    // PASSWORD
+                    // =============================================
+
                     TextField(
-                      controller: passwordController,
-                      obscureText: hidePassword,
-                      textInputAction: TextInputAction.next,
-                      decoration: inputDecoration(
-                        hint: 'Password',
-                        icon: Icons.lock_outline,
-                        valid: passwordFulfilled,
-                        suffix: IconButton(
+                      controller:
+                      passwordController,
+
+                      enabled:
+                      !isLoading,
+
+                      obscureText:
+                      hidePassword,
+
+                      textInputAction:
+                      TextInputAction
+                          .next,
+
+                      decoration:
+                      inputDecoration(
+                        hint:
+                        'Password',
+
+                        icon:
+                        Icons
+                            .lock_outline,
+
+                        valid:
+                        passwordFulfilled,
+
+                        suffix:
+                        IconButton(
                           onPressed: () {
-                            setState(() {
-                              hidePassword = !hidePassword;
-                            });
+                            setState(
+                                  () {
+                                hidePassword =
+                                !hidePassword;
+                              },
+                            );
                           },
-                          icon: Icon(
+
+                          icon:
+                          Icon(
                             hidePassword
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                            color: passwordFulfilled ? fulfilledCyan : mainGreen,
+                                ? Icons
+                                .visibility_off_outlined
+                                : Icons
+                                .visibility_outlined,
+
+                            color:
+                            passwordFulfilled
+                                ? fulfilledCyan
+                                : mainGreen,
                           ),
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 8),
+                    const SizedBox(
+                      height: 8,
+                    ),
+
+                    // =============================================
+                    // PASSWORD CHECKLIST
+                    // =============================================
 
                     Padding(
-                      padding: const EdgeInsets.only(left: 4),
+                      padding:
+                      const EdgeInsets
+                          .only(
+                        left: 4,
+                      ),
+
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                        crossAxisAlignment:
+                        CrossAxisAlignment
+                            .start,
+
                         children: [
-                          for (final rule in passwordChecklist.entries)
+                          for (final rule
+                          in passwordChecklist
+                              .entries)
                             Padding(
-                              padding: const EdgeInsets.only(bottom: 3),
-                              child: Row(
+                              padding:
+                              const EdgeInsets
+                                  .only(
+                                bottom: 3,
+                              ),
+
+                              child:
+                              Row(
                                 children: [
                                   Icon(
                                     rule.value
-                                        ? Icons.check_circle
-                                        : Icons.cancel,
-                                    size: 14,
-                                    color: rule.value
-                                        ? Colors.green.shade600
-                                        : Colors.red.shade400,
+                                        ? Icons
+                                        .check_circle
+                                        : Icons
+                                        .cancel,
+
+                                    size:
+                                    14,
+
+                                    color:
+                                    rule.value
+                                        ? Colors
+                                        .green
+                                        .shade600
+                                        : Colors
+                                        .red
+                                        .shade400,
                                   ),
-                                  const SizedBox(width: 6),
+
+                                  const SizedBox(
+                                    width:
+                                    6,
+                                  ),
+
                                   Text(
                                     rule.key,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: rule.value
-                                          ? Colors.green.shade700
-                                          : Colors.red.shade400,
-                                      fontWeight: rule.value
-                                          ? FontWeight.w600
-                                          : FontWeight.normal,
+
+                                    style:
+                                    TextStyle(
+                                      fontSize:
+                                      11,
+
+                                      color:
+                                      rule.value
+                                          ? Colors
+                                          .green
+                                          .shade700
+                                          : Colors
+                                          .red
+                                          .shade400,
+
+                                      fontWeight:
+                                      rule.value
+                                          ? FontWeight
+                                          .w600
+                                          : FontWeight
+                                          .normal,
                                     ),
                                   ),
                                 ],
@@ -330,110 +685,227 @@ class _RegisterPageState extends State<RegisterPage> {
                       ),
                     ),
 
-                    const SizedBox(height: 18),
+                    const SizedBox(
+                      height: 18,
+                    ),
 
-                    // Confirm Password
+                    // =============================================
+                    // CONFIRM PASSWORD
+                    // =============================================
+
                     TextField(
-                      controller: confirmPasswordController,
-                      obscureText: hideConfirmPassword,
-                      textInputAction: TextInputAction.done,
+                      controller:
+                      confirmPasswordController,
+
+                      enabled:
+                      !isLoading,
+
+                      obscureText:
+                      hideConfirmPassword,
+
+                      textInputAction:
+                      TextInputAction
+                          .done,
+
                       onSubmitted: (_) {
                         if (!isLoading) {
                           register();
                         }
                       },
-                      decoration: inputDecoration(
-                        hint: 'Confirm Password',
-                        icon: Icons.lock_outline,
-                        suffix: IconButton(
+
+                      decoration:
+                      inputDecoration(
+                        hint:
+                        'Confirm Password',
+
+                        icon:
+                        Icons
+                            .lock_outline,
+
+                        suffix:
+                        IconButton(
                           onPressed: () {
-                            setState(() {
-                              hideConfirmPassword = !hideConfirmPassword;
-                            });
+                            setState(
+                                  () {
+                                hideConfirmPassword =
+                                !hideConfirmPassword;
+                              },
+                            );
                           },
-                          icon: Icon(
+
+                          icon:
+                          Icon(
                             hideConfirmPassword
-                                ? Icons.visibility_off_outlined
-                                : Icons.visibility_outlined,
-                            color: mainGreen,
+                                ? Icons
+                                .visibility_off_outlined
+                                : Icons
+                                .visibility_outlined,
+
+                            color:
+                            mainGreen,
                           ),
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 12),
+                    const SizedBox(
+                      height: 12,
+                    ),
 
-                    // Create Account Button
+                    // =============================================
+                    // CREATE ACCOUNT BUTTON
+                    // =============================================
+
                     SizedBox(
-                      width: double.infinity,
-                      height: 55,
-                      child: ElevatedButton(
-                        onPressed: isLoading ? null : register,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: mainGreen,
-                          foregroundColor: Colors.white,
+                      width:
+                      double.infinity,
+
+                      height:
+                      55,
+
+                      child:
+                      ElevatedButton(
+                        onPressed:
+                        isLoading
+                            ? null
+                            : register,
+
+                        style:
+                        ElevatedButton
+                            .styleFrom(
+                          backgroundColor:
+                          mainGreen,
+
+                          foregroundColor:
+                          Colors.white,
+
                           disabledBackgroundColor:
-                          mainGreen.withOpacity(0.55),
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                          mainGreen
+                              .withOpacity(
+                            0.55,
+                          ),
+
+                          elevation:
+                          0,
+
+                          shape:
+                          RoundedRectangleBorder(
+                            borderRadius:
+                            BorderRadius
+                                .circular(
+                              16,
+                            ),
                           ),
                         ),
-                        child: isLoading
+
+                        child:
+                        isLoading
                             ? const SizedBox(
-                          height: 24,
-                          width: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
+                          height:
+                          24,
+
+                          width:
+                          24,
+
+                          child:
+                          CircularProgressIndicator(
+                            strokeWidth:
+                            2,
+
+                            color:
+                            Colors
+                                .white,
                           ),
                         )
                             : const Row(
                           mainAxisAlignment:
-                          MainAxisAlignment.center,
+                          MainAxisAlignment
+                              .center,
+
                           children: [
                             Text(
                               'Create Account',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
+
+                              style:
+                              TextStyle(
+                                fontSize:
+                                18,
+
+                                fontWeight:
+                                FontWeight
+                                    .bold,
                               ),
                             ),
-                            SizedBox(width: 10),
-                            Icon(Icons.eco),
+
+                            SizedBox(
+                              width:
+                              10,
+                            ),
+
+                            Icon(
+                              Icons
+                                  .eco,
+                            ),
                           ],
                         ),
                       ),
                     ),
 
-                    const SizedBox(height: 28),
+                    const SizedBox(
+                      height: 28,
+                    ),
 
-                    // Login link
+                    // =============================================
+                    // LOGIN LINK
+                    // =============================================
+
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisAlignment:
+                      MainAxisAlignment
+                          .center,
+
                       children: [
                         const Text(
                           'Already have an account?',
-                          style: TextStyle(
-                            color: Colors.grey,
+
+                          style:
+                          TextStyle(
+                            color:
+                            Colors.grey,
                           ),
                         ),
+
                         TextButton(
-                          onPressed: () {
-                            Navigator.pop(context);
+                          onPressed:
+                          isLoading
+                              ? null
+                              : () {
+                            Navigator.pop(
+                              context,
+                            );
                           },
-                          child: Text(
+
+                          child:
+                          const Text(
                             'Login',
-                            style: TextStyle(
-                              color: mainGreen,
-                              fontWeight: FontWeight.bold,
+
+                            style:
+                            TextStyle(
+                              color:
+                              mainGreen,
+
+                              fontWeight:
+                              FontWeight
+                                  .bold,
                             ),
                           ),
                         ),
                       ],
                     ),
 
-                    const SizedBox(height: 35),
+                    const SizedBox(
+                      height: 35,
+                    ),
                   ],
                 ),
               ),
@@ -444,48 +916,100 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 
-  // Same input styling as LoginPage's own fields - [valid] lights the
-  // field up fulfilledCyan instead of the usual mainGreen, used by the
-  // Password field so it turns cyan the moment it fulfils the rules
-  // (see passwordFulfilled/_checkPasswordFulfilled) rather than only
-  // showing red/green feedback once Submit is pressed.
+  // ============================================================
+  // INPUT DECORATION
+  // ============================================================
+
   InputDecoration inputDecoration({
     required String hint,
     required IconData icon,
     Widget? suffix,
     bool valid = false,
   }) {
-    final Color activeColor = valid ? fulfilledCyan : mainGreen;
+    final Color activeColor =
+    valid
+        ? fulfilledCyan
+        : mainGreen;
+
     return InputDecoration(
-      hintText: hint,
-      prefixIcon: Icon(
+      hintText:
+      hint,
+
+      prefixIcon:
+      Icon(
         icon,
-        color: activeColor,
+        color:
+        activeColor,
       ),
-      suffixIcon: suffix,
-      filled: true,
-      fillColor: Colors.white,
-      contentPadding: const EdgeInsets.symmetric(
-        vertical: 18,
+
+      suffixIcon:
+      suffix,
+
+      filled:
+      true,
+
+      fillColor:
+      Colors.white,
+
+      contentPadding:
+      const EdgeInsets
+          .symmetric(
+        vertical:
+        18,
       ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(
-          color: valid ? fulfilledCyan : mainGreen.withOpacity(0.25),
-          width: valid ? 1.5 : 1,
+
+      enabledBorder:
+      OutlineInputBorder(
+        borderRadius:
+        BorderRadius.circular(
+          16,
+        ),
+
+        borderSide:
+        BorderSide(
+          color:
+          valid
+              ? fulfilledCyan
+              : mainGreen
+              .withOpacity(
+            0.25,
+          ),
+
+          width:
+          valid
+              ? 1.5
+              : 1,
         ),
       ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(
-          color: activeColor,
-          width: 1.5,
+
+      focusedBorder:
+      OutlineInputBorder(
+        borderRadius:
+        BorderRadius.circular(
+          16,
+        ),
+
+        borderSide:
+        BorderSide(
+          color:
+          activeColor,
+
+          width:
+          1.5,
         ),
       ),
-      errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(
-          color: Colors.red,
+
+      errorBorder:
+      OutlineInputBorder(
+        borderRadius:
+        BorderRadius.circular(
+          16,
+        ),
+
+        borderSide:
+        const BorderSide(
+          color:
+          Colors.red,
         ),
       ),
     );

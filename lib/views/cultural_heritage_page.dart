@@ -867,16 +867,22 @@ class _HeritageCard extends StatelessWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: paleGreen,
+                        color: const Color(0xFFE8F5E9),
                         borderRadius:
-                        BorderRadius.circular(4),
+                        BorderRadius.circular(10),
+                        border: Border.all(
+                          color: const Color(0xFFC8E6C9),
+                          width: 0.7,
+                        ),
                       ),
                       child: Text(
                         attraction.category,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: green,
-                          fontSize: 7.5,
-                          fontWeight: FontWeight.w700,
+                          fontSize: 6.2,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),

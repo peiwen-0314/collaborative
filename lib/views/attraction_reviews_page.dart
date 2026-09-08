@@ -1,74 +1,135 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../models/attraction_review.dart';
 import '../models/attraction.dart';
+import '../models/attraction_review.dart';
 import '../services/attraction_reviews_service.dart';
 import 'review_comments_page.dart';
 import 'write_attraction_review_page.dart';
 
-/// Shows every review for one [AttractionModel], with like/comment
-/// actions on each, and a FAB to write a new one.
-class AttractionReviewsPage extends StatelessWidget {
-  const AttractionReviewsPage({super.key, required this.attraction});
+class AttractionReviewsPage
+    extends StatelessWidget {
+  const AttractionReviewsPage({
+    super.key,
+    required this.attraction,
+  });
 
   final AttractionModel attraction;
 
-  static const Color green = Color(0xFF2E7D32);
+  static const Color green =
+  Color(0xFF2E7D32);
 
   @override
-  Widget build(BuildContext context) {
-    final service = AttractionReviewsService.instance;
+  Widget build(
+      BuildContext context,
+      ) {
+    final service =
+        AttractionReviewsService
+            .instance;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8F6),
+      backgroundColor:
+      const Color(
+        0xFFF7F8F6,
+      ),
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
+        backgroundColor:
+        Colors.white,
+        surfaceTintColor:
+        Colors.white,
         title: Text(
           attraction.name,
-          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+          style:
+          const TextStyle(
+            fontWeight:
+            FontWeight.w800,
+            fontSize: 16,
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton:
+      FloatingActionButton
+          .extended(
         backgroundColor: green,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.rate_review_outlined),
-        label: const Text('Write a Review'),
+        foregroundColor:
+        Colors.white,
+        icon: const Icon(
+          Icons
+              .rate_review_outlined,
+        ),
+        label: const Text(
+          'Write a Review',
+        ),
         onPressed: () {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => WriteAttractionReviewPage(attraction: attraction),
+              builder: (_) =>
+                  WriteAttractionReviewPage(
+                    attraction:
+                    attraction,
+                  ),
             ),
           );
         },
       ),
       body: AnimatedBuilder(
         animation: service,
-        builder: (context, _) {
+        builder:
+            (context, child) {
           if (service.isLoading) {
             return const Center(
-              child: CircularProgressIndicator(color: green),
+              child:
+              CircularProgressIndicator(
+                color: green,
+              ),
             );
           }
 
-          if (service.errorMessage != null) {
+          if (service
+              .errorMessage !=
+              null) {
             return Center(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding:
+                const EdgeInsets
+                    .all(
+                  24,
+                ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisSize:
+                  MainAxisSize
+                      .min,
                   children: [
                     Text(
-                      service.errorMessage!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.black54),
+                      service
+                          .errorMessage!,
+                      textAlign:
+                      TextAlign
+                          .center,
+                      style:
+                      const TextStyle(
+                        color:
+                        Colors
+                            .black54,
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: () => service.retry(),
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Try again'),
+                    const SizedBox(
+                      height: 12,
+                    ),
+                    OutlinedButton
+                        .icon(
+                      onPressed:
+                      service.retry,
+                      icon:
+                      const Icon(
+                        Icons
+                            .refresh,
+                      ),
+                      label:
+                      const Text(
+                        'Try again',
+                      ),
                     ),
                   ],
                 ),
@@ -76,27 +137,59 @@ class AttractionReviewsPage extends StatelessWidget {
             );
           }
 
-          final reviews = service.reviewsFor(attraction.id);
+          final reviews =
+          service.reviewsFor(
+            attraction.id,
+          );
+
           if (reviews.isEmpty) {
             return Center(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding:
+                const EdgeInsets
+                    .all(
+                  24,
+                ),
                 child: Text(
                   'No reviews yet for ${attraction.name}.\nBe the first to share your experience!',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.black54),
+                  textAlign:
+                  TextAlign
+                      .center,
+                  style:
+                  const TextStyle(
+                    color:
+                    Colors
+                        .black54,
+                  ),
                 ),
               ),
             );
           }
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(18, 16, 18, 90),
-            itemCount: reviews.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            itemBuilder: (context, index) {
+
+          return ListView
+              .separated(
+            padding:
+            const EdgeInsets
+                .fromLTRB(
+              18,
+              16,
+              18,
+              90,
+            ),
+            itemCount:
+            reviews.length,
+            separatorBuilder:
+                (context, index) =>
+            const SizedBox(
+              height: 12,
+            ),
+            itemBuilder:
+                (context, index) {
               return _ReviewCard(
-                attractionId: attraction.id,
-                review: reviews[index],
+                attractionId:
+                attraction.id,
+                review:
+                reviews[index],
               );
             },
           );
@@ -106,51 +199,107 @@ class AttractionReviewsPage extends StatelessWidget {
   }
 }
 
-class _ReviewCard extends StatelessWidget {
-  const _ReviewCard({required this.attractionId, required this.review});
+class _ReviewCard
+    extends StatelessWidget {
+  const _ReviewCard({
+    required this.attractionId,
+    required this.review,
+  });
 
   final String attractionId;
   final AttractionReview review;
 
-  static const Color green = Color(0xFF2E7D32);
-  static const Color likeRed = Color(0xFFE0245E);
+  static const Color green =
+  Color(0xFF2E7D32);
 
-  Future<void> _confirmDelete(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+  static const Color likeRed =
+  Color(0xFFE0245E);
+
+  Future<void> _confirmDelete(
+      BuildContext context,
+      ) async {
+    final confirmed =
+    await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete review?'),
-        content: const Text(
-          'This review will be permanently removed. This action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+      builder: (dialogContext) =>
+          AlertDialog(
+            title: const Text(
+              'Delete review?',
+            ),
+            content: const Text(
+              'This review and its uploaded photos will be permanently removed.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () =>
+                    Navigator.pop(
+                      dialogContext,
+                      false,
+                    ),
+                child:
+                const Text(
+                  'Cancel',
+                ),
+              ),
+              FilledButton(
+                style:
+                FilledButton
+                    .styleFrom(
+                  backgroundColor:
+                  Colors.red,
+                ),
+                onPressed: () =>
+                    Navigator.pop(
+                      dialogContext,
+                      true,
+                    ),
+                child:
+                const Text(
+                  'Delete',
+                ),
+              ),
+            ],
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
     );
-    if (confirmed != true || !context.mounted) return;
+
+    if (confirmed != true ||
+        !context.mounted) {
+      return;
+    }
 
     try {
-      await AttractionReviewsService.instance.deleteReview(review.id);
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Review deleted.')),
+      await AttractionReviewsService
+          .instance
+          .deleteReview(
+        review.id,
+      );
+
+      if (!context.mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Review deleted.',
+          ),
+        ),
       );
     } catch (error) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      if (!context.mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
         SnackBar(
           content: Text(
             error is StateError
-                ? error.message.toString()
+                ? error.message
+                .toString()
                 : 'Unable to delete this review. Please try again.',
           ),
         ),
@@ -159,78 +308,162 @@ class _ReviewCard extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+      BuildContext context,
+      ) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding:
+      const EdgeInsets.all(
+        16,
+      ),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE1E5DF)),
+        borderRadius:
+        BorderRadius.circular(
+          16,
+        ),
+        border: Border.all(
+          color:
+          const Color(
+            0xFFE1E5DF,
+          ),
+        ),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+        CrossAxisAlignment
+            .start,
         children: [
           Row(
             children: [
               CircleAvatar(
                 radius: 18,
-                backgroundColor: green.withValues(alpha: 0.15),
+                backgroundColor:
+                green
+                    .withValues(
+                  alpha: 0.15,
+                ),
                 child: Text(
-                  review.authorName.isNotEmpty
-                      ? review.authorName[0].toUpperCase()
+                  review.authorName
+                      .isNotEmpty
+                      ? review
+                      .authorName[
+                  0]
+                      .toUpperCase()
                       : '?',
-                  style: const TextStyle(
+                  style:
+                  const TextStyle(
                     color: green,
-                    fontWeight: FontWeight.w800,
+                    fontWeight:
+                    FontWeight
+                        .w800,
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
+
+              const SizedBox(
+                width: 10,
+              ),
+
               Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
                   children: [
                     Text(
-                      review.authorName,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
+                      review
+                          .authorName,
+                      style:
+                      const TextStyle(
+                        fontWeight:
+                        FontWeight
+                            .w800,
+                        fontSize:
+                        13,
                       ),
                     ),
                     Text(
                       review.timeAgo,
-                      style: const TextStyle(
-                        color: Colors.black45,
-                        fontSize: 11,
+                      style:
+                      const TextStyle(
+                        color:
+                        Colors
+                            .black45,
+                        fontSize:
+                        11,
                       ),
                     ),
                   ],
                 ),
               ),
+
               Row(
-                children: List.generate(5, (i) {
-                  return Icon(
-                    i < review.rating ? Icons.star : Icons.star_border,
-                    size: 15,
-                    color: Colors.amber,
-                  );
-                }),
-              ),
-              if (FirebaseAuth.instance.currentUser?.uid == review.userId)
-                PopupMenuButton<String>(
-                  tooltip: 'Review options',
-                  icon: const Icon(Icons.more_vert, color: Colors.black54),
-                  onSelected: (value) {
-                    if (value == 'delete') _confirmDelete(context);
+                children:
+                List.generate(
+                  5,
+                      (index) {
+                    return Icon(
+                      index <
+                          review
+                              .rating
+                          ? Icons.star
+                          : Icons
+                          .star_border,
+                      size: 15,
+                      color:
+                      Colors.amber,
+                    );
                   },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem<String>(
-                      value: 'delete',
+                ),
+              ),
+
+              if (FirebaseAuth
+                  .instance
+                  .currentUser
+                  ?.uid ==
+                  review.userId)
+                PopupMenuButton<
+                    String>(
+                  tooltip:
+                  'Review options',
+                  icon:
+                  const Icon(
+                    Icons.more_vert,
+                    color:
+                    Colors
+                        .black54,
+                  ),
+                  onSelected:
+                      (value) {
+                    if (value ==
+                        'delete') {
+                      _confirmDelete(
+                        context,
+                      );
+                    }
+                  },
+                  itemBuilder:
+                      (context) =>
+                  const [
+                    PopupMenuItem<
+                        String>(
+                      value:
+                      'delete',
                       child: Row(
                         children: [
-                          Icon(Icons.delete_outline, color: Colors.red),
-                          SizedBox(width: 8),
-                          Text('Delete review'),
+                          Icon(
+                            Icons
+                                .delete_outline,
+                            color:
+                            Colors.red,
+                          ),
+                          SizedBox(
+                            width: 8,
+                          ),
+                          Text(
+                            'Delete review',
+                          ),
                         ],
                       ),
                     ),
@@ -238,59 +471,197 @@ class _ReviewCard extends StatelessWidget {
                 ),
             ],
           ),
-          const SizedBox(height: 10),
-          Text(review.text, style: const TextStyle(fontSize: 13, height: 1.5)),
-          const SizedBox(height: 10),
+
+          const SizedBox(
+            height: 10,
+          ),
+
+          Text(
+            review.text,
+            style:
+            const TextStyle(
+              fontSize: 13,
+              height: 1.5,
+            ),
+          ),
+
+          if (review
+              .photoUrls
+              .isNotEmpty) ...[
+            const SizedBox(
+              height: 12,
+            ),
+            SizedBox(
+              height: 115,
+              child:
+              ListView.separated(
+                scrollDirection:
+                Axis.horizontal,
+                itemCount:
+                review
+                    .photoUrls
+                    .length,
+                separatorBuilder:
+                    (context,
+                    index) =>
+                const SizedBox(
+                  width: 8,
+                ),
+                itemBuilder:
+                    (context,
+                    index) {
+                  final url =
+                  review
+                      .photoUrls[
+                  index];
+
+                  return InkWell(
+                    onTap: () =>
+                        _openPhoto(
+                          context,
+                          url,
+                        ),
+                    borderRadius:
+                    BorderRadius
+                        .circular(
+                      10,
+                    ),
+                    child:
+                    ClipRRect(
+                      borderRadius:
+                      BorderRadius
+                          .circular(
+                        10,
+                      ),
+                      child:
+                      SizedBox(
+                        width: 115,
+                        height: 115,
+                        child:
+                        Image.network(
+                          url,
+                          fit:
+                          BoxFit
+                              .cover,
+                          errorBuilder:
+                              (
+                              context,
+                              error,
+                              stackTrace,
+                              ) =>
+                              Container(
+                                color:
+                                const Color(
+                                  0xFFE8F5E9,
+                                ),
+                                child:
+                                const Icon(
+                                  Icons
+                                      .broken_image_outlined,
+                                  color:
+                                  green,
+                                ),
+                              ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+
+          const SizedBox(
+            height: 10,
+          ),
+
           Row(
             children: [
               InkWell(
-                onTap: () => AttractionReviewsService.instance
-                    .toggleLike(attractionId, review.id),
+                onTap: () =>
+                    AttractionReviewsService
+                        .instance
+                        .toggleLike(
+                      attractionId,
+                      review.id,
+                    ),
                 child: Row(
                   children: [
                     Icon(
-                      review.isLiked ? Icons.favorite : Icons.favorite_border,
+                      review.isLiked
+                          ? Icons
+                          .favorite
+                          : Icons
+                          .favorite_border,
                       size: 18,
-                      color: review.isLiked ? likeRed : Colors.black45,
+                      color:
+                      review.isLiked
+                          ? likeRed
+                          : Colors
+                          .black45,
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(
+                      width: 4,
+                    ),
                     Text(
                       '${review.likes}',
-                      style: TextStyle(
+                      style:
+                      TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: review.isLiked ? likeRed : green,
+                        fontWeight:
+                        FontWeight
+                            .w700,
+                        color:
+                        review
+                            .isLiked
+                            ? likeRed
+                            : green,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(width: 18),
+
+              const SizedBox(
+                width: 18,
+              ),
+
               InkWell(
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => ReviewCommentsPage(
-                        attractionId: attractionId,
-                        review: review,
-                      ),
+                      builder: (_) =>
+                          ReviewCommentsPage(
+                            attractionId:
+                            attractionId,
+                            review:
+                            review,
+                          ),
                     ),
                   );
                 },
                 child: Row(
                   children: [
                     const Icon(
-                      Icons.chat_bubble_outline,
+                      Icons
+                          .chat_bubble_outline,
                       size: 17,
-                      color: Colors.black45,
+                      color:
+                      Colors
+                          .black45,
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(
+                      width: 4,
+                    ),
                     Text(
                       '${review.comments.length}',
-                      style: const TextStyle(
+                      style:
+                      const TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.w700,
+                        fontWeight:
+                        FontWeight
+                            .w700,
                         color: green,
                       ),
                     ),
@@ -300,6 +671,41 @@ class _ReviewCard extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  void _openPhoto(
+      BuildContext context,
+      String url,
+      ) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            Scaffold(
+              backgroundColor:
+              Colors.black,
+              appBar: AppBar(
+                backgroundColor:
+                Colors.black,
+                foregroundColor:
+                Colors.white,
+              ),
+              body: Center(
+                child:
+                InteractiveViewer(
+                  minScale: 0.8,
+                  maxScale: 4,
+                  child:
+                  Image.network(
+                    url,
+                    fit:
+                    BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
       ),
     );
   }

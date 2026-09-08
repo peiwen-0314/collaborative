@@ -3,8 +3,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../controllers/ai_trip_planner_controller.dart';
+import '../controllers/personalization_controller.dart';
 import '../models/attraction.dart';
+import '../models/trip_schedule_item.dart';
 import 'attraction_detail_page.dart';
+import 'ai_trip_planner_page.dart';
 import 'trip_location_date_page.dart';
 
 class GeneratedTripPage extends StatefulWidget {
@@ -29,133 +32,211 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
   bool _isSaved = false;
   String? _savedPlanId;
 
+  final PersonalizationController
+  _personalizationController =
+  PersonalizationController();
+
+  bool _hasRecordedGeneratedPreferences = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _recordGeneratedTripPreferences(),
+    );
+  }
+
+  Future<void> _recordGeneratedTripPreferences() async {
+    if (_hasRecordedGeneratedPreferences) {
+      return;
+    }
+
+    _hasRecordedGeneratedPreferences = true;
+
+    await _personalizationController
+        .recordGeneratedTripPreferences(
+      selectedState:
+      widget.controller.preferences.selectedState,
+      travelStyles:
+      List<String>.from(
+        widget.controller.preferences.travelStyles,
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _personalizationController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final int days = widget.controller.preferences.totalDays <= 0
         ? 1
         : widget.controller.preferences.totalDays;
 
-    final List<AttractionModel> list =
-    widget.controller.attractionsForDay(selectedDay);
+    final List<TripScheduleItem> list =
+    widget.controller.scheduleForDay(selectedDay);
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _appBar(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        CircleAvatar(
-                          radius: 22,
-                          backgroundColor: lightGreen,
-                          child: Icon(
-                            Icons.check_circle_rounded,
-                            color: mainGreen,
-                            size: 30,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _returnToPlanner();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
+          child: Column(
+            children: [
+              _appBar(),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: lightGreen,
+                            child: Icon(
+                              Icons.check_circle_rounded,
+                              color: mainGreen,
+                              size: 30,
+                            ),
                           ),
-                        ),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Your trip is ready!',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Your trip is ready!',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
-                              ),
-                              SizedBox(height: 2),
-                              Text(
-                                'We’ve crafted a personalized, sustainable itinerary just for you.',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Color(0xFF777777),
-                                  height: 1.3,
+                                SizedBox(height: 2),
+                                Text(
+                                  'We’ve crafted a personalized, sustainable itinerary just for you.',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF777777),
+                                    height: 1.3,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      _summary(),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    _summary(),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      height: 36,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: days,
-                        separatorBuilder: (_, __) => const SizedBox(width: 7),
-                        itemBuilder: (context, index) {
-                          final bool isSelected = selectedDay == index;
-                          return InkWell(
-                            onTap: () {
-                              setState(() {
-                                selectedDay = index;
-                              });
-                            },
-                            borderRadius: BorderRadius.circular(20),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 15),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: isSelected ? mainGreen : Colors.white,
-                                border: Border.all(
-                                  color: isSelected
-                                      ? mainGreen
-                                      : const Color(0xFFE1E1E1),
-                                ),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF5F7F5),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.route_outlined,
+                              size: 14,
+                              color: mainGreen,
+                            ),
+                            SizedBox(width: 6),
+                            Expanded(
                               child: Text(
-                                'Day ${index + 1}',
+                                'Daily stop sequence optimized using HERE travel-time matrix, then refined with live route estimates.',
                                 style: TextStyle(
-                                  color: isSelected
-                                      ? Colors.white
-                                      : const Color(0xFF555555),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
+                                  fontSize: 7.5,
+                                  color: textGrey,
+                                  height: 1.25,
                                 ),
                               ),
                             ),
-                          );
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (list.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.all(30),
-                        child: Center(
-                          child: Text('No attractions for this day.'),
-                        ),
-                      )
-                    else
-                      ...List.generate(
-                        list.length,
-                            (index) => _item(
-                          list[index],
-                          index,
-                          index == list.length - 1,
+                          ],
                         ),
                       ),
-                  ],
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        height: 36,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: days,
+                          separatorBuilder: (_, __) => const SizedBox(width: 7),
+                          itemBuilder: (context, index) {
+                            final bool isSelected = selectedDay == index;
+                            return InkWell(
+                              onTap: () {
+                                setState(() {
+                                  selectedDay = index;
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(20),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 15),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: isSelected ? mainGreen : Colors.white,
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? mainGreen
+                                        : const Color(0xFFE1E1E1),
+                                  ),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  'Day ${index + 1}',
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Colors.white
+                                        : const Color(0xFF555555),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      if (list.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(30),
+                          child: Center(
+                            child: Text('No attractions for this day.'),
+                          ),
+                        )
+                      else
+                        ...List.generate(
+                          list.length,
+                              (index) => _item(
+                            list[index],
+                            index == list.length - 1,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            _bottomButtons(),
-          ],
+              _bottomButtons(),
+            ],
+          ),
         ),
       ),
     );
@@ -167,7 +248,7 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
       child: Row(
         children: [
           IconButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: _returnToPlanner,
             icon: const Icon(
               Icons.arrow_back_ios_new_rounded,
               size: 18,
@@ -190,39 +271,130 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
   }
 
   Widget _summary() {
-    final preferences = widget.controller.preferences;
-    final int totalDays = preferences.totalDays;
-    final double budget = preferences.budget;
-    final int places = widget.controller.generatedAttractions.length;
+    final preferences =
+        widget.controller.preferences;
+
+    final int totalDays =
+        preferences.totalDays;
+
+    final double budget =
+        preferences.budget;
+
+    final double estimatedCost =
+        widget.controller
+            .estimatedTotalAttractionCost;
+
+    final int places =
+        widget.controller
+            .generatedAttractions.length;
+
+    final bool overBudget =
+        widget.controller.isOverBudget;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 14,
+      ),
       decoration: BoxDecoration(
         color: lightGreen,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius:
+        BorderRadius.circular(10),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Expanded(
-            child: _summaryBox(
-              icon: Icons.calendar_today_outlined,
-              value: '$totalDays Days',
-              label: 'Total Days',
+          Row(
+            children: [
+              Expanded(
+                child: _summaryBox(
+                  icon:
+                  Icons.calendar_today_outlined,
+                  value:
+                  '$totalDays Days',
+                  label:
+                  'Total Days',
+                ),
+              ),
+              Expanded(
+                child: _summaryBox(
+                  icon:
+                  Icons.account_balance_wallet_outlined,
+                  value:
+                  'MYR ${_formatMoney(estimatedCost)} / ${_formatMoney(budget)}',
+                  label:
+                  'Est. Attraction Cost / Budget',
+                ),
+              ),
+              Expanded(
+                child: _summaryBox(
+                  icon:
+                  Icons.location_on_outlined,
+                  value:
+                  '$places ${places == 1 ? 'Place' : 'Places'}',
+                  label:
+                  'Total Attractions',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding:
+            const EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: 7,
+            ),
+            decoration: BoxDecoration(
+              color: overBudget
+                  ? const Color(0xFFFFF3E0)
+                  : Colors.white.withValues(
+                alpha: 0.72,
+              ),
+              borderRadius:
+              BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  overBudget
+                      ? Icons.warning_amber_rounded
+                      : Icons.check_circle_outline_rounded,
+                  size: 15,
+                  color: overBudget
+                      ? const Color(0xFFE65100)
+                      : mainGreen,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    overBudget
+                        ? 'Over budget by MYR ${_formatMoney(widget.controller.budgetDifference)}'
+                        : 'Within budget • MYR ${_formatMoney(widget.controller.remainingBudget < 0 ? 0 : widget.controller.remainingBudget)} remaining',
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      fontWeight:
+                      FontWeight.w600,
+                      color: overBudget
+                          ? const Color(0xFFE65100)
+                          : mainGreen,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          Expanded(
-            child: _summaryBox(
-              icon: Icons.account_balance_wallet_outlined,
-              value: 'MYR ${_formatMoney(budget)}',
-              label: 'Trip Budget',
-            ),
-          ),
-          Expanded(
-            child: _summaryBox(
-              icon: Icons.location_on_outlined,
-              value: '$places ${places == 1 ? 'Place' : 'Places'}',
-              label: 'Total Attractions',
+          const SizedBox(height: 4),
+          const Align(
+            alignment:
+            Alignment.centerLeft,
+            child: Text(
+              'Estimated cost currently includes attraction admission fees only.',
+              style: TextStyle(
+                fontSize: 6.8,
+                color: textGrey,
+              ),
             ),
           ),
         ],
@@ -273,26 +445,44 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     );
   }
 
-  Widget _item(AttractionModel attraction, int index, bool last) {
-    final String image = attraction.coverImageUrl.trim().isNotEmpty
+  Widget _item(
+      TripScheduleItem scheduleItem,
+      bool last,
+      ) {
+    final attraction =
+        scheduleItem.attraction;
+
+    final String image =
+    attraction.coverImageUrl
+        .trim()
+        .isNotEmpty
         ? attraction.coverImageUrl
         : attraction.imageUrls.isNotEmpty
         ? attraction.imageUrls.first
         : '';
 
-    final int hour = 8 + index * 3;
-    final String time =
-        '${hour > 12 ? hour - 12 : hour}:30 ${hour >= 12 ? 'pm' : 'am'}';
-
     final double estimatedFee =
-    widget.controller.estimateAttractionFee(attraction);
-    final String openingHours = _openingHours(attraction);
+        scheduleItem.estimatedFee;
+
+    final String openingHours =
+    _openingHours(attraction);
+
+    final String time =
+    _formatClock(
+      scheduleItem.startTime,
+    );
+
+    final String endTime =
+    _formatClock(
+      scheduleItem.endTime,
+    );
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+      CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 52,
+          width: 58,
           child: Text(
             time,
             style: const TextStyle(
@@ -310,180 +500,348 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
                 height: 10,
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  border: Border.all(color: mainGreen, width: 2),
+                  border: Border.all(
+                    color: mainGreen,
+                    width: 2,
+                  ),
                   shape: BoxShape.circle,
                 ),
               ),
               if (!last)
                 Container(
                   width: 1,
-                  height: 140,
-                  color: const Color(0xFFAAAAAA),
+                  height: 168,
+                  color:
+                  const Color(0xFFAAAAAA),
                 ),
             ],
           ),
         ),
         const SizedBox(width: 6),
         Expanded(
-          child: InkWell(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => AttractionDetailPage(
-                    attraction: attraction,
-                    estimatedFee: estimatedFee,
-                  ),
-                ),
-              );
-            },
-            borderRadius: BorderRadius.circular(9),
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: SizedBox(
-                      width: 82,
-                      height: 112,
-                      child: image.isEmpty
-                          ? Container(
-                        color: lightGreen,
-                        child: const Icon(
-                          Icons.image_outlined,
+          child: Padding(
+            padding:
+            const EdgeInsets.only(
+              bottom: 14,
+            ),
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                if (scheduleItem
+                    .transportMinutesBefore >
+                    0) ...[
+                  Container(
+                    margin:
+                    const EdgeInsets.only(
+                      bottom: 7,
+                    ),
+                    padding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color:
+                      const Color(0xFFF5F7F5),
+                      borderRadius:
+                      BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize:
+                      MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.directions_car_outlined,
+                          size: 12,
                           color: mainGreen,
                         ),
-                      )
-                          : Image.network(
-                        image,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          color: lightGreen,
-                          child: const Icon(
-                            Icons.image_outlined,
-                            color: mainGreen,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                        const SizedBox(width: 4),
                         Text(
-                          attraction.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
+                          '${scheduleItem.transportMinutesBefore} min'
+                              ' • '
+                              '${scheduleItem.distanceFromPreviousKm.toStringAsFixed(1)} km',
+                          style:
+                          const TextStyle(
+                            fontSize: 7.5,
+                            color: mainGreen,
+                            fontWeight:
+                            FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.location_on_outlined,
-                              color: mainGreen,
-                              size: 12,
-                            ),
-                            const SizedBox(width: 2),
-                            Expanded(
-                              child: Text(
-                                '${attraction.area}, ${attraction.state}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: mainGreen,
-                                  fontSize: 8,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 5),
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.schedule_outlined,
-                              size: 11,
-                              color: textGrey,
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                openingHours,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 8,
-                                  color: textGrey,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.confirmation_number_outlined,
-                              size: 11,
-                              color: textGrey,
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                attraction.isFreeEntry
-                                    ? 'Free Entry'
-                                    : 'Estimated Fee: MYR ${_formatMoney(estimatedFee)}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 8,
-                                  color: textGrey,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 5),
-                        if (!attraction.isFreeEntry)
-                          _feeInformation(attraction),
-                        const SizedBox(height: 5),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: lightGreen,
-                            borderRadius: BorderRadius.circular(15),
-                          ),
-                          child: Text(
-                            attraction.categoryName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: mainGreen,
-                              fontSize: 7,
-                              fontWeight: FontWeight.w600,
-                            ),
+                        const SizedBox(width: 4),
+                        Text(
+                          scheduleItem.usedHereRouting
+                              ? 'HERE'
+                              : 'estimated',
+                          style:
+                          const TextStyle(
+                            fontSize: 6.5,
+                            color: textGrey,
                           ),
                         ),
                       ],
                     ),
                   ),
                 ],
-              ),
+                InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            AttractionDetailPage(
+                              attraction:
+                              attraction,
+                              estimatedFee:
+                              estimatedFee,
+                            ),
+                      ),
+                    );
+                  },
+                  borderRadius:
+                  BorderRadius.circular(9),
+                  child: Row(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius:
+                        BorderRadius.circular(
+                          8,
+                        ),
+                        child: SizedBox(
+                          width: 82,
+                          height: 120,
+                          child: image.isEmpty
+                              ? Container(
+                            color:
+                            lightGreen,
+                            child:
+                            const Icon(
+                              Icons
+                                  .image_outlined,
+                              color:
+                              mainGreen,
+                            ),
+                          )
+                              : Image.network(
+                            image,
+                            fit: BoxFit.cover,
+                            errorBuilder:
+                                (
+                                _,
+                                __,
+                                ___,
+                                ) =>
+                                Container(
+                                  color:
+                                  lightGreen,
+                                  child:
+                                  const Icon(
+                                    Icons
+                                        .image_outlined,
+                                    color:
+                                    mainGreen,
+                                  ),
+                                ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              attraction.name,
+                              maxLines: 1,
+                              overflow:
+                              TextOverflow.ellipsis,
+                              style:
+                              const TextStyle(
+                                fontSize: 12,
+                                fontWeight:
+                                FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons
+                                      .location_on_outlined,
+                                  color:
+                                  mainGreen,
+                                  size: 12,
+                                ),
+                                const SizedBox(width: 2),
+                                Expanded(
+                                  child: Text(
+                                    '${attraction.area}, ${attraction.state}',
+                                    maxLines: 1,
+                                    overflow:
+                                    TextOverflow.ellipsis,
+                                    style:
+                                    const TextStyle(
+                                      color:
+                                      mainGreen,
+                                      fontSize: 8,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 5),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons
+                                      .schedule_outlined,
+                                  size: 11,
+                                  color:
+                                  textGrey,
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    '$time - $endTime'
+                                        ' • '
+                                        '${scheduleItem.visitMinutes} min visit',
+                                    maxLines: 1,
+                                    overflow:
+                                    TextOverflow.ellipsis,
+                                    style:
+                                    const TextStyle(
+                                      fontSize: 8,
+                                      color:
+                                      textGrey,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons
+                                      .access_time_rounded,
+                                  size: 11,
+                                  color:
+                                  textGrey,
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    openingHours,
+                                    maxLines: 1,
+                                    overflow:
+                                    TextOverflow.ellipsis,
+                                    style:
+                                    const TextStyle(
+                                      fontSize: 8,
+                                      color:
+                                      textGrey,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons
+                                      .confirmation_number_outlined,
+                                  size: 11,
+                                  color:
+                                  textGrey,
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    attraction
+                                        .isFreeEntry
+                                        ? 'Free Entry'
+                                        : 'Estimated Fee: MYR ${_formatMoney(estimatedFee)}',
+                                    maxLines: 1,
+                                    overflow:
+                                    TextOverflow.ellipsis,
+                                    style:
+                                    const TextStyle(
+                                      fontSize: 8,
+                                      color:
+                                      textGrey,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 5),
+                            Wrap(
+                              spacing: 4,
+                              runSpacing: 4,
+                              children:
+                              _categoryTags(
+                                attraction,
+                              )
+                                  .map(
+                                _categoryChip,
+                              )
+                                  .toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ),
       ],
+    );
+  }
+
+  List<String> _categoryTags(
+      AttractionModel attraction,
+      ) {
+    final tags = <String>{
+      ...attraction.categoryNames
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty),
+      if (attraction.categoryName.trim().isNotEmpty)
+        attraction.categoryName.trim(),
+    }.toList();
+
+    return tags.isEmpty ? <String>['Attraction'] : tags;
+  }
+
+  Widget _categoryChip(String value) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 7,
+        vertical: 3,
+      ),
+      decoration: BoxDecoration(
+        color: lightGreen,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(
+          color: const Color(0xFFC8E6C9),
+          width: 0.7,
+        ),
+      ),
+      child: Text(
+        value,
+        style: const TextStyle(
+          color: mainGreen,
+          fontSize: 7,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 
@@ -655,6 +1013,8 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
           'name': attraction.name,
           'categoryId': attraction.categoryId,
           'categoryName': attraction.categoryName,
+          'categoryIds': attraction.categoryIds,
+          'categoryNames': attraction.categoryNames,
           'state': attraction.state,
           'area': attraction.area,
           'address': attraction.address,
@@ -676,6 +1036,7 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
           'facilities': attraction.facilities,
           'highlights': attraction.highlights,
           'day': _getAttractionDay(attraction),
+          ..._scheduleDataForAttraction(attraction),
         });
       }
 
@@ -698,13 +1059,11 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
         'seniors': preferences.seniors,
         'totalTravelers': preferences.totalTravelers,
         'travelerSummary': preferences.travelerSummary,
-        'wheelchairAccessible': preferences.wheelchairAccessible,
-        'strollerFriendly': preferences.strollerFriendly,
-        'serviceAnimalFriendly': preferences.serviceAnimalFriendly,
         'budget': preferences.budget,
         'estimatedAttractionCost':
         widget.controller.estimatedTotalAttractionCost,
-        'travelStyle': preferences.travelStyle,
+        'travelStyles': List<String>.from(preferences.travelStyles),
+        'travelStyleSummary': preferences.travelStyleSummary,
         'totalAttractions': attractions.length,
         'attractions': attractionData,
         'status': 'saved',
@@ -739,6 +1098,39 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     }
   }
 
+  Map<String, dynamic> _scheduleDataForAttraction(
+      AttractionModel attraction,
+      ) {
+    for (final item
+    in widget.controller.generatedSchedule) {
+      if (item.attraction.id ==
+          attraction.id) {
+        return {
+          'startTime':
+          Timestamp.fromDate(
+            item.startTime,
+          ),
+          'endTime':
+          Timestamp.fromDate(
+            item.endTime,
+          ),
+          'visitMinutes':
+          item.visitMinutes,
+          'transportMinutesBefore':
+          item.transportMinutesBefore,
+          'distanceFromPreviousKm':
+          item.distanceFromPreviousKm,
+          'usedHereRouting':
+          item.usedHereRouting,
+          'recommendationScore':
+          item.recommendationScore,
+        };
+      }
+    }
+
+    return {};
+  }
+
   int _getAttractionDay(AttractionModel attraction) {
     final int totalDays = widget.controller.preferences.totalDays <= 0
         ? 1
@@ -758,6 +1150,17 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     }
 
     return 1;
+  }
+
+  void _returnToPlanner() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+        const AiTripPlannerPage(),
+      ),
+          (route) => route.isFirst,
+    );
   }
 
   void _regeneratePlan() {
@@ -831,6 +1234,29 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     }
 
     return input;
+  }
+
+  String _formatClock(
+      DateTime value,
+      ) {
+    final hour =
+    value.hour == 0
+        ? 12
+        : value.hour > 12
+        ? value.hour - 12
+        : value.hour;
+
+    final minute =
+    value.minute
+        .toString()
+        .padLeft(2, '0');
+
+    final period =
+    value.hour >= 12
+        ? 'PM'
+        : 'AM';
+
+    return '$hour:$minute $period';
   }
 
   String _formatMoney(double value) {

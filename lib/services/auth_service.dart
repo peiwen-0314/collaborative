@@ -176,7 +176,7 @@ class AuthService {
   Future<void> logout() async {
     final bool isGoogleUser = _auth.currentUser?.providerData.any(
           (info) => info.providerId == 'google.com',
-        ) ??
+    ) ??
         false;
 
     await _auth.signOut();
@@ -191,8 +191,8 @@ class AuthService {
 
     try {
       await GoogleSignIn.instance.signOut().timeout(
-            const Duration(seconds: 5),
-          );
+        const Duration(seconds: 5),
+      );
     } catch (_) {
       // Firebase sign-out above already logged the person out of
       // EcoTravel - a slow/broken Google sign-out shouldn't block that.
@@ -240,7 +240,7 @@ class AuthService {
     }
 
     final bool usesPasswordSignIn = user.providerData.any(
-      (info) => info.providerId == 'password',
+          (info) => info.providerId == 'password',
     );
 
     if (!usesPasswordSignIn) {

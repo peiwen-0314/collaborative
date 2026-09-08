@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
-
+import 'package:url_launcher/url_launcher.dart';
 import '../models/attraction.dart';
+import '../services/attraction_reviews_service.dart';
+import '../services/saved_attractions_service.dart';
+import 'attraction_reviews_page.dart';
+import 'write_attraction_review_page.dart';
+
 
 class AttractionDetailPage extends StatelessWidget {
   final AttractionModel attraction;
 
-  /// Only pass this when coming from Generated Trip.
-  /// Home / Recommended attraction can leave it null.
   final double? estimatedFee;
 
   const AttractionDetailPage({
@@ -47,7 +50,7 @@ class AttractionDetailPage extends StatelessWidget {
                 children: [
                   SizedBox(
                     width: double.infinity,
-                    height: 225,
+                    height: 210,
                     child: hero.isEmpty
                         ? Container(
                       color: lightGreen,
@@ -90,6 +93,90 @@ class AttractionDetailPage extends StatelessWidget {
                       ),
                     ),
                   ),
+
+                  // =====================================================
+                  // SAVE / UNSAVE
+                  // =====================================================
+                  Positioned(
+                    right: 10,
+                    top: 10,
+                    child: StreamBuilder<Set<String>>(
+                      stream: SavedAttractionsService
+                          .instance
+                          .watchSavedIds(),
+                      builder: (context, snapshot) {
+                        final isSaved =
+                            snapshot.data?.contains(
+                              attraction.id,
+                            ) ??
+                                false;
+
+                        return CircleAvatar(
+                          backgroundColor:
+                          Colors.white.withValues(
+                            alpha: 0.92,
+                          ),
+                          child: IconButton(
+                            tooltip: isSaved
+                                ? 'Remove from saved'
+                                : 'Save attraction',
+                            onPressed: () async {
+                              try {
+                                final nowSaved =
+                                await SavedAttractionsService
+                                    .instance
+                                    .toggle(
+                                  attraction,
+                                );
+
+                                if (!context.mounted) {
+                                  return;
+                                }
+
+                                ScaffoldMessenger.of(
+                                  context,
+                                )
+                                  ..hideCurrentSnackBar()
+                                  ..showSnackBar(
+                                    SnackBar(
+                                      backgroundColor:
+                                      mainGreen,
+                                      content: Text(
+                                        nowSaved
+                                            ? '${attraction.name} saved.'
+                                            : '${attraction.name} removed from saved.',
+                                      ),
+                                    ),
+                                  );
+                              } catch (_) {
+                                if (!context.mounted) {
+                                  return;
+                                }
+
+                                ScaffoldMessenger.of(
+                                  context,
+                                ).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Please login before saving attractions.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                            icon: Icon(
+                              isSaved
+                                  ? Icons.favorite_rounded
+                                  : Icons
+                                  .favorite_border_rounded,
+                              color: mainGreen,
+                              size: 20,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                 ],
               ),
 
@@ -97,7 +184,7 @@ class AttractionDetailPage extends StatelessWidget {
               // MAIN CARD
               // =====================================================
               Transform.translate(
-                offset: const Offset(0, -18),
+                offset: const Offset(0, -70),
                 child: Container(
                   margin: const EdgeInsets.symmetric(
                     horizontal: 10,
@@ -161,7 +248,127 @@ class AttractionDetailPage extends StatelessWidget {
                         ],
                       ),
 
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 10),
+
+                      // =================================================
+                      // RATING / REVIEWS - CLICKABLE
+                      // =================================================
+                      AnimatedBuilder(
+                        animation:
+                        AttractionReviewsService.instance,
+                        builder: (context, _) {
+                          final service =
+                              AttractionReviewsService.instance;
+
+                          final rating =
+                          service.averageRatingFor(
+                            attraction.id,
+                          );
+
+                          final count =
+                          service.reviewCountFor(
+                            attraction.id,
+                          );
+
+                          return InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      AttractionReviewsPage(
+                                        attraction:
+                                        attraction,
+                                      ),
+                                ),
+                              );
+                            },
+                            borderRadius:
+                            BorderRadius.circular(8),
+                            child: Padding(
+                              padding:
+                              const EdgeInsets.symmetric(
+                                vertical: 5,
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    rating > 0
+                                        ? Icons.star_rounded
+                                        : Icons
+                                        .star_border_rounded,
+                                    size: 17,
+                                    color: const Color(
+                                      0xFFFFB300,
+                                    ),
+                                  ),
+
+                                  const SizedBox(
+                                    width: 4,
+                                  ),
+
+                                  Text(
+                                    rating > 0
+                                        ? rating
+                                        .toStringAsFixed(
+                                      1,
+                                    )
+                                        : 'Not rated yet',
+                                    style:
+                                    const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight:
+                                      FontWeight.w700,
+                                    ),
+                                  ),
+
+                                  const SizedBox(
+                                    width: 5,
+                                  ),
+
+                                  Text(
+                                    '($count review${count == 1 ? '' : 's'})',
+                                    style:
+                                    const TextStyle(
+                                      fontSize: 8,
+                                      color:
+                                      secondaryText,
+                                    ),
+                                  ),
+
+                                  const Spacer(),
+
+                                  const Text(
+                                    'View Reviews',
+                                    style:
+                                    TextStyle(
+                                      fontSize: 8,
+                                      color:
+                                      mainGreen,
+                                      fontWeight:
+                                      FontWeight.w600,
+                                    ),
+                                  ),
+
+                                  const SizedBox(
+                                    width: 2,
+                                  ),
+
+                                  const Icon(
+                                    Icons
+                                        .chevron_right_rounded,
+                                    size: 17,
+                                    color:
+                                    mainGreen,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+
+                      const SizedBox(height: 8),
 
                       const Divider(),
 
@@ -201,10 +408,17 @@ class AttractionDetailPage extends StatelessWidget {
                           // OPENING HOURS
                           // =================================================
                           Expanded(
-                            child: _info(
-                              Icons.schedule_outlined,
-                              'Opening Hours',
-                              _openingHours(),
+                            child: InkWell(
+                              onTap: () {
+                                _showWeeklyOpeningHours(context);
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: _info(
+                                Icons.schedule_outlined,
+                                'Opening Hours',
+                                _todayOpeningHours(),
+                                helperText: 'Tap to view week',
+                              ),
                             ),
                           ),
 
@@ -344,6 +558,189 @@ class AttractionDetailPage extends StatelessWidget {
                       const SizedBox(height: 12),
 
                       // =================================================
+                      // REVIEWS
+                      // =================================================
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Reviews',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight:
+                                FontWeight.w700,
+                              ),
+                            ),
+                          ),
+
+                          TextButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      AttractionReviewsPage(
+                                        attraction:
+                                        attraction,
+                                      ),
+                                ),
+                              );
+                            },
+                            child: const Text(
+                              'View All',
+                              style: TextStyle(
+                                fontSize: 8,
+                                color: mainGreen,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      AnimatedBuilder(
+                        animation:
+                        AttractionReviewsService.instance,
+                        builder: (context, _) {
+                          final service =
+                              AttractionReviewsService.instance;
+
+                          final rating =
+                          service.averageRatingFor(
+                            attraction.id,
+                          );
+
+                          final count =
+                          service.reviewCountFor(
+                            attraction.id,
+                          );
+
+                          return Container(
+                            width: double.infinity,
+                            padding:
+                            const EdgeInsets.all(
+                              11,
+                            ),
+                            decoration: BoxDecoration(
+                              color: lightGreen,
+                              borderRadius:
+                              BorderRadius.circular(
+                                9,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons
+                                      .rate_review_outlined,
+                                  size: 20,
+                                  color:
+                                  mainGreen,
+                                ),
+
+                                const SizedBox(
+                                  width: 9,
+                                ),
+
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                    CrossAxisAlignment
+                                        .start,
+                                    children: [
+                                      Text(
+                                        rating > 0
+                                            ? '${rating.toStringAsFixed(1)} / 5'
+                                            : 'No ratings yet',
+                                        style:
+                                        const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight:
+                                          FontWeight
+                                              .w700,
+                                          color:
+                                          mainGreen,
+                                        ),
+                                      ),
+                                      const SizedBox(
+                                        height: 2,
+                                      ),
+                                      Text(
+                                        count == 0
+                                            ? 'Be the first to share your experience.'
+                                            : 'Based on $count review${count == 1 ? '' : 's'}',
+                                        style:
+                                        const TextStyle(
+                                          fontSize: 7.5,
+                                          color:
+                                          secondaryText,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      SizedBox(
+                        width: double.infinity,
+                        height: 38,
+                        child:
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    WriteAttractionReviewPage(
+                                      attraction:
+                                      attraction,
+                                    ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(
+                            Icons
+                                .edit_outlined,
+                            size: 15,
+                          ),
+                          label: const Text(
+                            'Write a Review',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight:
+                              FontWeight.w600,
+                            ),
+                          ),
+                          style:
+                          OutlinedButton.styleFrom(
+                            foregroundColor:
+                            mainGreen,
+                            side: const BorderSide(
+                              color: mainGreen,
+                            ),
+                            shape:
+                            RoundedRectangleBorder(
+                              borderRadius:
+                              BorderRadius.circular(
+                                8,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      const Divider(),
+
+                      const SizedBox(height: 12),
+
+                      // =================================================
                       // LOCATION
                       // =================================================
                       const Text(
@@ -386,14 +783,7 @@ class AttractionDetailPage extends StatelessWidget {
                         height: 42,
                         child: OutlinedButton.icon(
                           onPressed: () {
-                            ScaffoldMessenger.of(context)
-                                .showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Google Maps integration can be connected here.',
-                                ),
-                              ),
-                            );
+                            _openGoogleMaps(context);
                           },
                           icon: const Icon(
                             Icons.navigation_outlined,
@@ -408,8 +798,7 @@ class AttractionDetailPage extends StatelessWidget {
                               color: mainGreen,
                             ),
                             shape: RoundedRectangleBorder(
-                              borderRadius:
-                              BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(8),
                             ),
                           ),
                         ),
@@ -727,31 +1116,392 @@ class AttractionDetailPage extends StatelessWidget {
   // OPENING HOURS
   // ============================================================
 
-  String _openingHours() {
-    final String opening =
-    _format24HourTime(
-      attraction.openingTime,
+  /// Compact value shown in the quick-information row.
+  ///
+  /// - If ALL weekly values are empty -> All Day
+  /// - If weekly data exists but today is empty -> Closed
+  /// - If today has one/multiple periods -> show them
+  /// - If isOpen24Hours == true -> All Day
+  String _todayOpeningHours() {
+    if (attraction.isOpen24Hours) {
+      return 'All Day';
+    }
+
+    if (!_hasAnyWeeklyOpeningHours()) {
+      return 'All Day';
+    }
+
+    final String todayKey =
+    _weekdayKey(DateTime.now().weekday);
+
+    final List<String> periods =
+    _periodsForDay(todayKey);
+
+    if (periods.isEmpty) {
+      return 'Closed';
+    }
+
+    return periods
+        .map(_formatOpeningPeriod)
+        .join(', ');
+  }
+
+  /// Full Monday-Sunday opening-hours popup.
+  void _showWeeklyOpeningHours(
+      BuildContext context,
+      ) {
+    final bool allEmpty =
+    !_hasAnyWeeklyOpeningHours();
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(
+        alpha: 0.35,
+      ),
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.white,
+          insetPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 34,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius:
+            BorderRadius.circular(14),
+          ),
+          child: Padding(
+            padding:
+            const EdgeInsets.fromLTRB(
+              16,
+              15,
+              16,
+              14,
+            ),
+            child: Column(
+              mainAxisSize:
+              MainAxisSize.min,
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Opening Hours',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight:
+                          FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () {
+                        Navigator.pop(
+                          dialogContext,
+                        );
+                      },
+                      borderRadius:
+                      BorderRadius.circular(
+                        20,
+                      ),
+                      child: const Padding(
+                        padding:
+                        EdgeInsets.all(3),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 18,
+                          color:
+                          secondaryText,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 4),
+
+                const Text(
+                  'Weekly schedule',
+                  style: TextStyle(
+                    fontSize: 8,
+                    color: secondaryText,
+                  ),
+                ),
+
+                const SizedBox(height: 14),
+
+                if (attraction.isOpen24Hours ||
+                    allEmpty)
+                  _allDayNotice()
+                else
+                  ..._weekdayOrder.map(
+                        (day) {
+                      final periods =
+                      _periodsForDay(
+                        day,
+                      );
+
+                      final String value =
+                      periods.isEmpty
+                          ? 'Closed'
+                          : periods
+                          .map(
+                        _formatOpeningPeriod,
+                      )
+                          .join(
+                        '\n',
+                      );
+
+                      return Padding(
+                        padding:
+                        const EdgeInsets.only(
+                          bottom: 10,
+                        ),
+                        child: Row(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: 82,
+                              child: Text(
+                                _weekdayLabel(
+                                  day,
+                                ),
+                                style:
+                                const TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight:
+                                  FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(
+                                value,
+                                textAlign:
+                                TextAlign.right,
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  height: 1.25,
+                                  color: periods
+                                      .isEmpty
+                                      ? const Color(
+                                    0xFFB85C5C,
+                                  )
+                                      : secondaryText,
+                                  fontWeight:
+                                  periods.isEmpty
+                                      ? FontWeight
+                                      .w600
+                                      : FontWeight
+                                      .w400,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+
+                const SizedBox(height: 4),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 35,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(
+                        dialogContext,
+                      );
+                    },
+                    style:
+                    ElevatedButton.styleFrom(
+                      elevation: 0,
+                      backgroundColor:
+                      mainGreen,
+                      foregroundColor:
+                      Colors.white,
+                      shape:
+                      RoundedRectangleBorder(
+                        borderRadius:
+                        BorderRadius.circular(
+                          7,
+                        ),
+                      ),
+                    ),
+                    child: const Text(
+                      'Close',
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight:
+                        FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _allDayNotice() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(
+        bottom: 14,
+      ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 12,
+      ),
+      decoration: BoxDecoration(
+        color: lightGreen,
+        borderRadius:
+        BorderRadius.circular(9),
+      ),
+      child: const Row(
+        children: [
+          Icon(
+            Icons.access_time_rounded,
+            size: 18,
+            color: mainGreen,
+          ),
+          SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'All Day',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight:
+                    FontWeight.w700,
+                    color: mainGreen,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'No specific weekly opening hours are provided.',
+                  style: TextStyle(
+                    fontSize: 7.5,
+                    color: secondaryText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static const List<String>
+  _weekdayOrder = [
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+    'sunday',
+  ];
+
+  bool _hasAnyWeeklyOpeningHours() {
+    if (attraction.openingHours.isEmpty) {
+      return false;
+    }
+
+    for (final entry
+    in attraction.openingHours.entries) {
+      for (final value in entry.value) {
+        final clean =
+        value.trim().toLowerCase();
+
+        if (clean.isNotEmpty &&
+            clean != 'closed') {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  List<String> _periodsForDay(
+      String dayKey,
+      ) {
+    for (final entry
+    in attraction.openingHours.entries) {
+      if (entry.key
+          .trim()
+          .toLowerCase() ==
+          dayKey.toLowerCase()) {
+        return entry.value
+            .map(
+              (value) =>
+              value.trim(),
+        )
+            .where(
+              (value) =>
+          value.isNotEmpty &&
+              value.toLowerCase() !=
+                  'closed',
+        )
+            .toList();
+      }
+    }
+
+    return [];
+  }
+
+  String _weekdayKey(int weekday) {
+    return _weekdayOrder[
+    weekday - 1];
+  }
+
+  String _weekdayLabel(String key) {
+    if (key.isEmpty) {
+      return key;
+    }
+
+    return '${key[0].toUpperCase()}'
+        '${key.substring(1)}';
+  }
+
+  String _formatOpeningPeriod(
+      String value,
+      ) {
+    final parts = value.split(
+      RegExp(r'\s*[-–—]\s*'),
     );
 
-    final String closing =
+    if (parts.length != 2) {
+      return value;
+    }
+
+    final opening =
     _format24HourTime(
-      attraction.closingTime,
+      parts[0],
     );
 
-    if (opening.isEmpty &&
+    final closing =
+    _format24HourTime(
+      parts[1],
+    );
+
+    if (opening.isEmpty ||
         closing.isEmpty) {
-      return '-';
+      return value;
     }
 
-    if (opening.isEmpty) {
-      return closing;
-    }
-
-    if (closing.isEmpty) {
-      return opening;
-    }
-
-    return '$opening-$closing';
+    return '$opening - $closing';
   }
 
   // ============================================================
@@ -833,6 +1583,40 @@ class AttractionDetailPage extends StatelessWidget {
   // LOCATION
   // ============================================================
 
+  Future<void> _openGoogleMaps(
+      BuildContext context,
+      ) async {
+    final String destination;
+
+    if (attraction.address.trim().isNotEmpty) {
+      destination = attraction.address.trim();
+    } else {
+      destination = '${attraction.name}, ${_locationText()}';
+    }
+
+    final Uri googleMapsUrl = Uri.parse(
+      'https://www.google.com/maps/dir/'
+          '?api=1'
+          '&destination=${Uri.encodeComponent(destination)}'
+          '&travelmode=driving',
+    );
+
+    final bool launched = await launchUrl(
+      googleMapsUrl,
+      mode: LaunchMode.externalApplication,
+    );
+
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Unable to open Google Maps.',
+          ),
+        ),
+      );
+    }
+  }
+
   String _locationText() {
     final String area =
     attraction.area.trim();
@@ -908,8 +1692,9 @@ class AttractionDetailPage extends StatelessWidget {
   Widget _info(
       IconData icon,
       String title,
-      String value,
-      ) {
+      String value, {
+        String? helperText,
+      }) {
     return Padding(
       padding:
       const EdgeInsets.symmetric(
@@ -953,6 +1738,21 @@ class AttractionDetailPage extends StatelessWidget {
               color: secondaryText,
             ),
           ),
+
+          if (helperText != null &&
+              helperText.trim().isNotEmpty) ...[
+            const SizedBox(height: 2),
+
+            Text(
+              helperText,
+              style: const TextStyle(
+                fontSize: 5.8,
+                color: mainGreen,
+                fontWeight:
+                FontWeight.w500,
+              ),
+            ),
+          ],
 
           if (!attraction.isFreeEntry &&
               (title == 'Entry Fee' ||

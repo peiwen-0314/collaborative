@@ -7,12 +7,13 @@ import 'package:flutter/material.dart';
 
 import '../models/attraction.dart';
 import '../models/category.dart';
+import '../services/here_geocoding_service.dart';
 
 class SelectedAttractionImage {
   final String name;
   final Uint8List bytes;
 
-  SelectedAttractionImage({
+  const SelectedAttractionImage({
     required this.name,
     required this.bytes,
   });
@@ -21,6 +22,7 @@ class SelectedAttractionImage {
 class AttractionController extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
+  final HereGeocodingService _hereGeocoding = HereGeocodingService();
 
   List<AttractionModel> _attractions = [];
   List<CategoryModel> _categories = [];
@@ -38,6 +40,8 @@ class AttractionController extends ChangeNotifier {
   final List<SelectedAttractionImage> _selectedImages = [];
   int _coverImageIndex = 0;
 
+  String? _lastSavedAttractionId;
+
   List<AttractionModel> get attractions => _attractions;
   List<CategoryModel> get categories => _categories;
   bool get isLoading => _isLoading;
@@ -50,17 +54,46 @@ class AttractionController extends ChangeNotifier {
   List<SelectedAttractionImage> get selectedImages =>
       List.unmodifiable(_selectedImages);
   int get coverImageIndex => _coverImageIndex;
+  bool get isHereConfigured => _hereGeocoding.isConfigured;
+  String? get lastSavedAttractionId => _lastSavedAttractionId;
+
+  Future<HereCoordinates?> _findCoordinates({
+    required String name,
+    required String address,
+    required String area,
+    required String state,
+  }) async {
+    if (!_hereGeocoding.isConfigured) {
+      return null;
+    }
+
+    try {
+      return await _hereGeocoding.geocodeAttraction(
+        name: name,
+        address: address,
+        area: area,
+        state: state,
+      );
+    } catch (e) {
+      debugPrint('HERE geocoding error: $e');
+      return null;
+    }
+  }
 
   List<AttractionModel> get filteredAttractions {
     List<AttractionModel> result = List.from(_attractions);
 
     if (_searchQuery.trim().isNotEmpty) {
       final query = _searchQuery.trim().toLowerCase();
+
       result = result.where((attraction) {
         return attraction.name.toLowerCase().contains(query) ||
             attraction.state.toLowerCase().contains(query) ||
             attraction.area.toLowerCase().contains(query) ||
-            attraction.categoryName.toLowerCase().contains(query);
+            attraction.categoryName.toLowerCase().contains(query) ||
+            attraction.categoryNames.any(
+                  (name) => name.toLowerCase().contains(query),
+            );
       }).toList();
     }
 
@@ -71,9 +104,10 @@ class AttractionController extends ChangeNotifier {
     }
 
     if (_selectedCategory != 'All Categories') {
-      result = result
-          .where((attraction) => attraction.categoryId == _selectedCategory)
-          .toList();
+      result = result.where((attraction) {
+        return attraction.categoryId == _selectedCategory ||
+            attraction.categoryIds.contains(_selectedCategory);
+      }).toList();
     }
 
     return result;
@@ -82,6 +116,7 @@ class AttractionController extends ChangeNotifier {
   List<AttractionModel> get paginatedAttractions {
     final filtered = filteredAttractions;
     final startIndex = (_currentPage - 1) * _itemsPerPage;
+
     if (startIndex >= filtered.length) return [];
 
     final endIndex = startIndex + _itemsPerPage > filtered.length
@@ -97,17 +132,34 @@ class AttractionController extends ChangeNotifier {
   }
 
   int get totalAttractions => _attractions.length;
+
   int get activeAttractions =>
       _attractions.where((item) => item.status == 'Active').length;
+
   int get inactiveAttractions =>
       _attractions.where((item) => item.status == 'Inactive').length;
-  int get totalCategories =>
-      _attractions.map((item) => item.categoryId).where((id) => id.isNotEmpty).toSet().length;
+
+  int get totalCategories {
+    final ids = <String>{};
+
+    for (final attraction in _attractions) {
+      ids.addAll(
+        attraction.categoryIds.where((id) => id.trim().isNotEmpty),
+      );
+
+      if (attraction.categoryId.trim().isNotEmpty) {
+        ids.add(attraction.categoryId.trim());
+      }
+    }
+
+    return ids.length;
+  }
 
   Future<void> loadData() async {
     try {
       _isLoading = true;
       notifyListeners();
+
       await Future.wait([
         loadCategories(notify: false),
         loadAttractions(notify: false),
@@ -123,13 +175,16 @@ class AttractionController extends ChangeNotifier {
   Future<void> loadCategories({bool notify = true}) async {
     try {
       final snapshot = await _firestore.collection('categories').get();
+
       _categories = snapshot.docs
           .map(CategoryModel.fromFirestore)
           .where((category) => category.status == 'Active')
           .toList();
+
       _categories.sort(
             (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
       );
+
       if (notify) notifyListeners();
     } catch (e) {
       debugPrint('Load categories error: $e');
@@ -139,9 +194,18 @@ class AttractionController extends ChangeNotifier {
   Future<void> loadAttractions({bool notify = true}) async {
     try {
       final snapshot = await _firestore.collection('attractions').get();
-      _attractions = snapshot.docs.map(AttractionModel.fromFirestore).toList();
-      _attractions.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      if (_currentPage > totalPages) _currentPage = totalPages;
+
+      _attractions =
+          snapshot.docs.map(AttractionModel.fromFirestore).toList();
+
+      _attractions.sort(
+            (a, b) => b.createdAt.compareTo(a.createdAt),
+      );
+
+      if (_currentPage > totalPages) {
+        _currentPage = totalPages;
+      }
+
       if (notify) notifyListeners();
     } catch (e) {
       debugPrint('Load attractions error: $e');
@@ -203,15 +267,24 @@ class AttractionController extends ChangeNotifier {
 
   Future<void> pickImages() async {
     try {
-      final List<PlatformFile> files = await FilePicker.pickFiles(
+      final List<PlatformFile> files =
+      await FilePicker.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+        allowedExtensions: [
+          'jpg',
+          'jpeg',
+          'png',
+          'webp',
+        ],
       );
 
-      if (files.isEmpty) return;
+      if (files.isEmpty) {
+        return;
+      }
 
       for (final PlatformFile file in files) {
-        final Uint8List bytes = await file.readAsBytes();
+        final Uint8List bytes =
+        await file.readAsBytes();
 
         _selectedImages.add(
           SelectedAttractionImage(
@@ -223,12 +296,15 @@ class AttractionController extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      debugPrint('Pick images error: $e');
+      debugPrint(
+        'Pick images error: $e',
+      );
     }
   }
 
   void removeImage(int index) {
     if (index < 0 || index >= _selectedImages.length) return;
+
     _selectedImages.removeAt(index);
 
     if (_selectedImages.isEmpty) {
@@ -238,6 +314,7 @@ class AttractionController extends ChangeNotifier {
     } else if (_coverImageIndex > index) {
       _coverImageIndex--;
     }
+
     notifyListeners();
   }
 
@@ -260,7 +337,8 @@ class AttractionController extends ChangeNotifier {
     required int index,
   }) async {
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final safeName = image.name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+    final safeName =
+    image.name.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
 
     final reference = _storage
         .ref()
@@ -270,7 +348,9 @@ class AttractionController extends ChangeNotifier {
 
     await reference.putData(
       image.bytes,
-      SettableMetadata(contentType: _contentType(image.name)),
+      SettableMetadata(
+        contentType: _contentType(image.name),
+      ),
     );
 
     return reference.getDownloadURL();
@@ -278,15 +358,65 @@ class AttractionController extends ChangeNotifier {
 
   String _contentType(String name) {
     final lower = name.toLowerCase();
+
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
+
     return 'image/jpeg';
+  }
+
+  List<String> _cleanList(Iterable<String> values) {
+    return <String>{
+      ...values.map((value) => value.trim()).where((value) => value.isNotEmpty),
+    }.toList();
+  }
+
+  String _legacyOpeningTime(
+      Map<String, List<String>> openingHours,
+      bool isOpen24Hours,
+      ) {
+    if (isOpen24Hours) return '24 Hours';
+
+    for (final periods in openingHours.values) {
+      if (periods.isEmpty) continue;
+
+      final first = periods.first;
+      final parts = first.split('-');
+
+      if (parts.length >= 2) {
+        return parts.first.trim();
+      }
+    }
+
+    return '';
+  }
+
+  String _legacyClosingTime(
+      Map<String, List<String>> openingHours,
+      bool isOpen24Hours,
+      ) {
+    if (isOpen24Hours) return '24 Hours';
+
+    for (final periods in openingHours.values) {
+      if (periods.isEmpty) continue;
+
+      final first = periods.first;
+      final parts = first.split('-');
+
+      if (parts.length >= 2) {
+        return parts.last.trim();
+      }
+    }
+
+    return '';
   }
 
   Future<bool> addAttraction({
     required String name,
     required String categoryId,
     required String categoryName,
+    List<String> categoryIds = const <String>[],
+    List<String> categoryNames = const <String>[],
     required String state,
     required String area,
     required String description,
@@ -297,26 +427,38 @@ class AttractionController extends ChangeNotifier {
     required double nonMalaysianAdultFee,
     required double nonMalaysianChildFee,
     required double nonMalaysianSeniorFee,
-    required String openingTime,
-    required String closingTime,
+    String openingTime = '',
+    String closingTime = '',
+    Map<String, List<String>> openingHours =
+    const <String, List<String>>{},
+    bool isOpen24Hours = false,
     required String recommendedDuration,
     required String address,
-    required double latitude,
-    required double longitude,
     required String phoneNumber,
+    String websiteUrl = '',
+    String googlePlaceId = '',
+    double latitude = 0,
+    double longitude = 0,
     required List<String> facilities,
     required List<String> highlights,
     required String status,
   }) async {
     try {
       _isProcessing = true;
+      _lastSavedAttractionId = null;
       notifyListeners();
+
+      if (categoryId.trim().isEmpty) {
+        debugPrint('Add attraction error: category ID is empty');
+        return false;
+      }
 
       final duplicate = await _firestore
           .collection('attractions')
           .where('name', isEqualTo: name.trim())
           .limit(1)
           .get();
+
       if (duplicate.docs.isNotEmpty) {
         debugPrint('Add attraction error: duplicate attraction name');
         return false;
@@ -324,64 +466,113 @@ class AttractionController extends ChangeNotifier {
 
       final document = _firestore.collection('attractions').doc();
 
-      final List<String> urls = await Future.wait(
+      final urls = await Future.wait(
         List.generate(
           _selectedImages.length,
-              (index) {
-            return _uploadImage(
-              attractionId: document.id,
-              image: _selectedImages[index],
-              index: index,
-            );
-          },
+              (index) => _uploadImage(
+            attractionId: document.id,
+            image: _selectedImages[index],
+            index: index,
+          ),
         ),
       );
 
       String coverImageUrl = '';
+
       if (urls.isNotEmpty) {
-        final index = _coverImageIndex < urls.length ? _coverImageIndex : 0;
+        final index =
+        _coverImageIndex < urls.length ? _coverImageIndex : 0;
         coverImageUrl = urls[index];
       }
+
+      double finalLatitude = latitude;
+      double finalLongitude = longitude;
+
+      if (finalLatitude == 0 || finalLongitude == 0) {
+        final coordinates = await _findCoordinates(
+          name: name,
+          address: address,
+          area: area,
+          state: state,
+        );
+
+        finalLatitude = coordinates?.latitude ?? finalLatitude;
+        finalLongitude = coordinates?.longitude ?? finalLongitude;
+      }
+
+      final finalCategoryIds = _cleanList([
+        categoryId,
+        ...categoryIds,
+      ]);
+
+      final finalCategoryNames = _cleanList([
+        categoryName,
+        ...categoryNames,
+      ]);
+
+      final legacyOpeningTime = openingTime.trim().isNotEmpty
+          ? openingTime.trim()
+          : _legacyOpeningTime(openingHours, isOpen24Hours);
+
+      final legacyClosingTime = closingTime.trim().isNotEmpty
+          ? closingTime.trim()
+          : _legacyClosingTime(openingHours, isOpen24Hours);
 
       final attraction = AttractionModel(
         id: document.id,
         name: name.trim(),
-        categoryId: categoryId,
-        categoryName: categoryName,
-        state: state,
+        categoryId: categoryId.trim(),
+        categoryName: categoryName.trim(),
+        categoryIds: finalCategoryIds,
+        categoryNames: finalCategoryNames,
+        state: state.trim(),
         area: area.trim(),
         description: description.trim(),
         isFreeEntry: isFreeEntry,
         malaysianAdultFee: isFreeEntry ? 0 : malaysianAdultFee,
         malaysianChildFee: isFreeEntry ? 0 : malaysianChildFee,
         malaysianSeniorFee: isFreeEntry ? 0 : malaysianSeniorFee,
-        nonMalaysianAdultFee: isFreeEntry ? 0 : nonMalaysianAdultFee,
-        nonMalaysianChildFee: isFreeEntry ? 0 : nonMalaysianChildFee,
-        nonMalaysianSeniorFee: isFreeEntry ? 0 : nonMalaysianSeniorFee,
-        openingTime: openingTime,
-        closingTime: closingTime,
-        recommendedDuration: recommendedDuration,
+        nonMalaysianAdultFee:
+        isFreeEntry ? 0 : nonMalaysianAdultFee,
+        nonMalaysianChildFee:
+        isFreeEntry ? 0 : nonMalaysianChildFee,
+        nonMalaysianSeniorFee:
+        isFreeEntry ? 0 : nonMalaysianSeniorFee,
+        openingTime: legacyOpeningTime,
+        closingTime: legacyClosingTime,
+        openingHours: openingHours,
+        isOpen24Hours: isOpen24Hours,
+        recommendedDuration: recommendedDuration.trim(),
         address: address.trim(),
-        latitude: latitude,
-        longitude: longitude,
         phoneNumber: phoneNumber.trim(),
-        facilities: facilities,
-        highlights: highlights,
+        websiteUrl: websiteUrl.trim(),
+        googlePlaceId: googlePlaceId.trim(),
+        latitude: finalLatitude,
+        longitude: finalLongitude,
+        facilities: _cleanList(facilities),
+        highlights: _cleanList(highlights),
         imageUrls: urls,
         coverImageUrl: coverImageUrl,
-        status: status,
+        status: status.trim(),
         createdAt: DateTime.now(),
       );
 
       final batch = _firestore.batch();
       batch.set(document, attraction.toMap());
-      batch.update(
-        _firestore.collection('categories').doc(categoryId),
-        {'attractionCount': FieldValue.increment(1)},
-      );
+
+      for (final id in finalCategoryIds) {
+        batch.update(
+          _firestore.collection('categories').doc(id),
+          {'attractionCount': FieldValue.increment(1)},
+        );
+      }
+
       await batch.commit();
 
+      _lastSavedAttractionId = document.id;
       clearSelectedImages();
+      await loadAttractions(notify: false);
+
       return true;
     } catch (e) {
       debugPrint('Add attraction error: $e');
@@ -397,6 +588,8 @@ class AttractionController extends ChangeNotifier {
     required String name,
     required String categoryId,
     required String categoryName,
+    List<String> categoryIds = const <String>[],
+    List<String> categoryNames = const <String>[],
     required String state,
     required String area,
     required String description,
@@ -407,13 +600,18 @@ class AttractionController extends ChangeNotifier {
     required double nonMalaysianAdultFee,
     required double nonMalaysianChildFee,
     required double nonMalaysianSeniorFee,
-    required String openingTime,
-    required String closingTime,
+    String openingTime = '',
+    String closingTime = '',
+    Map<String, List<String>> openingHours =
+    const <String, List<String>>{},
+    bool isOpen24Hours = false,
     required String recommendedDuration,
     required String address,
-    required double latitude,
-    required double longitude,
     required String phoneNumber,
+    String websiteUrl = '',
+    String googlePlaceId = '',
+    double latitude = 0,
+    double longitude = 0,
     required List<String> facilities,
     required List<String> highlights,
     required List<String> existingImageUrls,
@@ -422,91 +620,163 @@ class AttractionController extends ChangeNotifier {
   }) async {
     try {
       _isProcessing = true;
+      _lastSavedAttractionId = null;
       notifyListeners();
+
+      final attractionId = original.id.trim();
+
+      if (attractionId.isEmpty || categoryId.trim().isEmpty) {
+        return false;
+      }
 
       final duplicate = await _firestore
           .collection('attractions')
           .where('name', isEqualTo: name.trim())
           .get();
-      if (duplicate.docs.any((doc) => doc.id != original.id)) {
-        debugPrint('Update attraction error: duplicate attraction name');
+
+      if (duplicate.docs.any((doc) => doc.id != attractionId)) {
         return false;
       }
 
-      final List<String> newUrls = await Future.wait(
+      final newUrls = await Future.wait(
         List.generate(
           _selectedImages.length,
-              (index) {
-            return _uploadImage(
-              attractionId: original.id,
-              image: _selectedImages[index],
-              index: index,
-            );
-          },
+              (index) => _uploadImage(
+            attractionId: attractionId,
+            image: _selectedImages[index],
+            index: index,
+          ),
         ),
       );
 
-      final List<String> finalImages = [...existingImageUrls, ...newUrls];
+      final finalImages = <String>[
+        ...existingImageUrls,
+        ...newUrls,
+      ];
+
       String finalCoverUrl = '';
 
       if (selectedExistingCoverUrl != null &&
           finalImages.contains(selectedExistingCoverUrl)) {
         finalCoverUrl = selectedExistingCoverUrl;
       } else if (newUrls.isNotEmpty) {
-        final newIndex = _coverImageIndex < newUrls.length ? _coverImageIndex : 0;
-        finalCoverUrl = newUrls[newIndex];
+        final index =
+        _coverImageIndex < newUrls.length ? _coverImageIndex : 0;
+        finalCoverUrl = newUrls[index];
       } else if (finalImages.isNotEmpty) {
         finalCoverUrl = finalImages.first;
       }
 
+      double finalLatitude = latitude;
+      double finalLongitude = longitude;
+
+      if (finalLatitude == 0 || finalLongitude == 0) {
+        final coordinates = await _findCoordinates(
+          name: name,
+          address: address,
+          area: area,
+          state: state,
+        );
+
+        finalLatitude =
+            coordinates?.latitude ?? original.latitude;
+        finalLongitude =
+            coordinates?.longitude ?? original.longitude;
+      }
+
+      final newCategoryIds = _cleanList([
+        categoryId,
+        ...categoryIds,
+      ]);
+
+      final newCategoryNames = _cleanList([
+        categoryName,
+        ...categoryNames,
+      ]);
+
+      final oldCategoryIds = <String>{
+        ...original.categoryIds
+            .map((id) => id.trim())
+            .where((id) => id.isNotEmpty),
+        if (original.categoryId.trim().isNotEmpty)
+          original.categoryId.trim(),
+      };
+
+      final newCategorySet = newCategoryIds.toSet();
+
+      final legacyOpeningTime = openingTime.trim().isNotEmpty
+          ? openingTime.trim()
+          : _legacyOpeningTime(openingHours, isOpen24Hours);
+
+      final legacyClosingTime = closingTime.trim().isNotEmpty
+          ? closingTime.trim()
+          : _legacyClosingTime(openingHours, isOpen24Hours);
+
       final batch = _firestore.batch();
-      final attractionRef = _firestore.collection('attractions').doc(original.id);
 
-      batch.update(attractionRef, {
-        'name': name.trim(),
-        'categoryId': categoryId,
-        'categoryName': categoryName,
-        'state': state,
-        'area': area.trim(),
-        'description': description.trim(),
-        'isFreeEntry': isFreeEntry,
-        'malaysianAdultFee': isFreeEntry ? 0 : malaysianAdultFee,
-        'malaysianChildFee': isFreeEntry ? 0 : malaysianChildFee,
-        'malaysianSeniorFee': isFreeEntry ? 0 : malaysianSeniorFee,
-        'nonMalaysianAdultFee': isFreeEntry ? 0 : nonMalaysianAdultFee,
-        'nonMalaysianChildFee': isFreeEntry ? 0 : nonMalaysianChildFee,
-        'nonMalaysianSeniorFee': isFreeEntry ? 0 : nonMalaysianSeniorFee,
-        'openingTime': openingTime,
-        'closingTime': closingTime,
-        'recommendedDuration': recommendedDuration,
-        'address': address.trim(),
-        'latitude': latitude,
-        'longitude': longitude,
-        'phoneNumber': phoneNumber.trim(),
-        'facilities': facilities,
-        'highlights': highlights,
-        'imageUrls': finalImages,
-        'coverImageUrl': finalCoverUrl,
-        'status': status,
-        'updatedAt': FieldValue.serverTimestamp(),
-        // Remove obsolete legacy fee fields if they exist.
-        'adultFee': FieldValue.delete(),
-        'childFee': FieldValue.delete(),
-      });
+      batch.update(
+        _firestore.collection('attractions').doc(attractionId),
+        {
+          'name': name.trim(),
+          'categoryId': categoryId.trim(),
+          'categoryName': categoryName.trim(),
+          'categoryIds': newCategoryIds,
+          'categoryNames': newCategoryNames,
+          'state': state.trim(),
+          'area': area.trim(),
+          'description': description.trim(),
+          'isFreeEntry': isFreeEntry,
+          'malaysianAdultFee': isFreeEntry ? 0 : malaysianAdultFee,
+          'malaysianChildFee': isFreeEntry ? 0 : malaysianChildFee,
+          'malaysianSeniorFee': isFreeEntry ? 0 : malaysianSeniorFee,
+          'nonMalaysianAdultFee':
+          isFreeEntry ? 0 : nonMalaysianAdultFee,
+          'nonMalaysianChildFee':
+          isFreeEntry ? 0 : nonMalaysianChildFee,
+          'nonMalaysianSeniorFee':
+          isFreeEntry ? 0 : nonMalaysianSeniorFee,
+          'openingTime': legacyOpeningTime,
+          'closingTime': legacyClosingTime,
+          'openingHours': openingHours,
+          'isOpen24Hours': isOpen24Hours,
+          'recommendedDuration': recommendedDuration.trim(),
+          'address': address.trim(),
+          'phoneNumber': phoneNumber.trim(),
+          'websiteUrl': websiteUrl.trim(),
+          'googlePlaceId': googlePlaceId.trim(),
+          'latitude': finalLatitude,
+          'longitude': finalLongitude,
+          'facilities': _cleanList(facilities),
+          'highlights': _cleanList(highlights),
+          'imageUrls': finalImages,
+          'coverImageUrl': finalCoverUrl,
+          'status': status.trim(),
+          'updatedAt': FieldValue.serverTimestamp(),
+          'adultFee': FieldValue.delete(),
+          'childFee': FieldValue.delete(),
+        },
+      );
 
-      if (original.categoryId != categoryId) {
+      for (final removed in oldCategoryIds.difference(newCategorySet)) {
         batch.update(
-          _firestore.collection('categories').doc(original.categoryId),
+          _firestore.collection('categories').doc(removed),
           {'attractionCount': FieldValue.increment(-1)},
         );
+      }
+
+      for (final added in newCategorySet.difference(oldCategoryIds)) {
         batch.update(
-          _firestore.collection('categories').doc(categoryId),
+          _firestore.collection('categories').doc(added),
           {'attractionCount': FieldValue.increment(1)},
         );
       }
 
       await batch.commit();
+
+      _lastSavedAttractionId = attractionId;
       clearSelectedImages();
+      await loadAttractions(notify: false);
+
       return true;
     } catch (e) {
       debugPrint('Update attraction error: $e');
@@ -519,9 +789,76 @@ class AttractionController extends ChangeNotifier {
 
   Future<void> deleteStorageImage(String url) async {
     try {
+      if (url.trim().isEmpty) return;
       await _storage.refFromURL(url).delete();
     } catch (e) {
       debugPrint('Delete storage image error: $e');
+    }
+  }
+
+  Future<Map<String, int>> geocodeAllMissingAttractions() async {
+    int updated = 0;
+    int failed = 0;
+    int skipped = 0;
+
+    if (!_hereGeocoding.isConfigured) {
+      throw StateError(
+        'HERE_API_KEY is missing. Run with '
+            '--dart-define=HERE_API_KEY=YOUR_KEY.',
+      );
+    }
+
+    try {
+      _isProcessing = true;
+      notifyListeners();
+
+      final snapshot = await _firestore.collection('attractions').get();
+
+      for (final document in snapshot.docs) {
+        final attraction = AttractionModel.fromFirestore(document);
+
+        if (attraction.latitude != 0 && attraction.longitude != 0) {
+          skipped++;
+          continue;
+        }
+
+        final coordinates = await _findCoordinates(
+          name: attraction.name,
+          address: attraction.address,
+          area: attraction.area,
+          state: attraction.state,
+        );
+
+        if (coordinates == null) {
+          failed++;
+          continue;
+        }
+
+        await document.reference.update({
+          'latitude': coordinates.latitude,
+          'longitude': coordinates.longitude,
+          'geocodedAddress': coordinates.matchedAddress,
+          'geocodedAt': FieldValue.serverTimestamp(),
+          'geocodingProvider': 'HERE',
+        });
+
+        updated++;
+
+        await Future<void>.delayed(
+          const Duration(milliseconds: 150),
+        );
+      }
+
+      await loadAttractions(notify: false);
+
+      return {
+        'updated': updated,
+        'failed': failed,
+        'skipped': skipped,
+      };
+    } finally {
+      _isProcessing = false;
+      notifyListeners();
     }
   }
 
@@ -530,16 +867,35 @@ class AttractionController extends ChangeNotifier {
       _isProcessing = true;
       notifyListeners();
 
+      final attractionId = attraction.id.trim();
+      if (attractionId.isEmpty) return false;
+
+      final categoryIds = <String>{
+        ...attraction.categoryIds
+            .map((id) => id.trim())
+            .where((id) => id.isNotEmpty),
+        if (attraction.categoryId.trim().isNotEmpty)
+          attraction.categoryId.trim(),
+      };
+
       final batch = _firestore.batch();
-      batch.delete(_firestore.collection('attractions').doc(attraction.id));
-      batch.update(
-        _firestore.collection('categories').doc(attraction.categoryId),
-        {'attractionCount': FieldValue.increment(-1)},
+
+      batch.delete(
+        _firestore.collection('attractions').doc(attractionId),
       );
+
+      for (final categoryId in categoryIds) {
+        batch.update(
+          _firestore.collection('categories').doc(categoryId),
+          {'attractionCount': FieldValue.increment(-1)},
+        );
+      }
+
       await batch.commit();
 
-      // Storage cleanup after Firestore succeeds.
       for (final url in attraction.imageUrls) {
+        if (url.trim().isEmpty) continue;
+
         try {
           await _storage.refFromURL(url).delete();
         } catch (e) {
@@ -548,6 +904,7 @@ class AttractionController extends ChangeNotifier {
       }
 
       await loadAttractions(notify: false);
+
       return true;
     } catch (e) {
       debugPrint('Delete attraction error: $e');

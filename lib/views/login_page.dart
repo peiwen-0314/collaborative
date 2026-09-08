@@ -20,6 +20,7 @@ class _LoginPageState extends State<LoginPage> {
   final AuthController authController = AuthController();
 
   bool isLoading = false;
+  bool isGoogleLoading = false;
   bool hidePassword = true;
 
   final Color mainGreen = const Color(0xFF2E7D32);
@@ -68,6 +69,48 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Future<void> googleLogin() async {
+    if (isLoading || isGoogleLoading) return;
+
+    setState(() {
+      isGoogleLoading = true;
+    });
+
+    final String? error =
+    await authController.signInWithGoogle();
+
+    if (!mounted) return;
+
+    setState(() {
+      isGoogleLoading = false;
+    });
+
+    if (error == null) {
+      final personalization =
+      PersonalizationController();
+
+      final needsOnboarding =
+      await personalization.needsOnboarding();
+
+      personalization.dispose();
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => needsOnboarding
+              ? const InterestSelectionPage()
+              : const HomePage(),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error)),
+      );
+    }
+  }
+
   @override
   void dispose() {
     emailController.dispose();
@@ -84,20 +127,21 @@ class _LoginPageState extends State<LoginPage> {
           child: Column(
             children: [
 
-              // =====================================
-              // TOP BACKGROUND SECTION
-              // =====================================
+              // =========================================================
+              // TOP BACKGROUND / HERO
+              // =========================================================
               SizedBox(
-                height: 430,
+                height: (MediaQuery.sizeOf(context).height * 0.30)
+                    .clamp(235.0, 300.0),
                 width: double.infinity,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-
-                    // Background Image
+                    // Background image
                     Image.asset(
                       'assets/images/backgroundImg.png',
                       fit: BoxFit.cover,
+                      alignment: Alignment.center,
                     ),
 
                     // Light overlay
@@ -107,33 +151,41 @@ class _LoginPageState extends State<LoginPage> {
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
                           colors: [
-                            Colors.white.withOpacity(0.10),
-                            Colors.white.withOpacity(0.20),
-                            Colors.white.withOpacity(0.80),
+                            Colors.white.withOpacity(0.03),
+                            Colors.white.withOpacity(0.08),
+                            Colors.white.withOpacity(0.55),
                           ],
                         ),
                       ),
                     ),
 
-                    // Logo + Title
+                    // =====================================================
+                    // TEXT
+                    // =====================================================
                     Positioned(
-                      left: 30,
-                      bottom: 45,
+                      left: 28,
+                      right: 28,
+
+                       bottom: 35,
+
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Row(
                             children: [
                               Icon(
                                 Icons.eco,
-                                size: 55,
+                                size: 38,
                                 color: mainGreen,
                               ),
-                              const SizedBox(width: 8),
+
+                              const SizedBox(width: 7),
+
                               Text(
                                 'EcoTravel',
                                 style: TextStyle(
-                                  fontSize: 42,
+                                  fontSize: 32,
                                   fontWeight: FontWeight.bold,
                                   color: mainGreen,
                                 ),
@@ -141,26 +193,26 @@ class _LoginPageState extends State<LoginPage> {
                             ],
                           ),
 
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 3),
 
                           Text(
                             'Travel Smart, Travel Green',
                             style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w500,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
                               color: mainGreen,
                             ),
                           ),
 
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 12),
 
                           const Text(
                             'Plan sustainable trips,\n'
                                 'explore responsibly,\n'
                                 'and protect our planet.',
                             style: TextStyle(
-                              fontSize: 17,
-                              height: 1.5,
+                              fontSize: 13.5,
+                              height: 1.30,
                               color: Colors.black87,
                             ),
                           ),
@@ -374,68 +426,52 @@ class _LoginPageState extends State<LoginPage> {
 
                     const SizedBox(height: 24),
 
-                    // Social buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              // Google login later
-                            },
-                            icon: const Icon(
-                              Icons.g_mobiledata,
-                              size: 28,
-                            ),
-                            label: const Text('Google'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor:
-                              Colors.black87,
-                              padding:
-                              const EdgeInsets.symmetric(
-                                vertical: 16,
-                              ),
-                              side: BorderSide(
-                                color:
-                                Colors.grey.shade300,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius:
-                                BorderRadius.circular(14),
-                              ),
-                            ),
+                    // Google login only
+                    SizedBox(
+                      width: double.infinity,
+                      height: 55,
+                      child: OutlinedButton(
+                        onPressed: isLoading || isGoogleLoading
+                            ? null
+                            : googleLogin,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.black87,
+                          side: BorderSide(
+                            color: Colors.grey.shade300,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
                           ),
                         ),
-
-                        const SizedBox(width: 14),
-
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              // Facebook login later
-                            },
-                            icon: const Icon(
-                              Icons.facebook,
-                            ),
-                            label: const Text('Facebook'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor:
-                              Colors.black87,
-                              padding:
-                              const EdgeInsets.symmetric(
-                                vertical: 16,
-                              ),
-                              side: BorderSide(
-                                color:
-                                Colors.grey.shade300,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius:
-                                BorderRadius.circular(14),
-                              ),
-                            ),
+                        child: isGoogleLoading
+                            ? SizedBox(
+                          width: 23,
+                          height: 23,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: mainGreen,
                           ),
+                        )
+                            : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Image.asset(
+                              'assets/images/googleIcon.png',
+                              width: 24,
+                              height: 24,
+                              fit: BoxFit.contain,
+                            ),
+                            const SizedBox(width: 12),
+                            const Text(
+                              'Continue with Google',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
 
                     const SizedBox(height: 30),

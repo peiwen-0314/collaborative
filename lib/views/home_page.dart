@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -7,6 +9,8 @@ import '../controllers/personalization_controller.dart';
 import '../models/attraction.dart';
 import '../models/user.dart';
 import '../services/heritage_nearby_service.dart';
+import '../services/saved_attractions_service.dart';
+import '../services/attraction_reviews_service.dart';
 import '../widgets/eco_bottom_navigation.dart';
 
 import 'ai_trip_planner_page.dart';
@@ -17,6 +21,7 @@ import 'community_feed_page.dart';
 import 'heritage_detail_page.dart';
 import 'profile_page.dart';
 import 'ride_home_page.dart';
+import 'saved_attractions_page.dart';
 
 class HomePage extends StatefulWidget {
   final VoidCallback? onTransportTap;
@@ -72,6 +77,14 @@ class _HomePageState extends State<HomePage> {
 
   final AuthController _authController = AuthController();
 
+  final SavedAttractionsService _savedAttractionsService = SavedAttractionsService.instance;
+
+  StreamSubscription<Set<String>>?
+  _savedAttractionsSubscription;
+
+  Set<String> _savedAttractionIds =
+  <String>{};
+
   /// The signed-in user's own Firestore users/{uid} doc (name/email/
   /// photoUrl) - see ProfilePage, which is where this is actually kept
   /// up to date. Loaded once here too so the header's greeting/avatar
@@ -100,10 +113,95 @@ class _HomePageState extends State<HomePage> {
     _controller.loadHomeData();
     _personalizationController.loadRecommendations();
     _loadProfile();
+    _listenToSavedAttractions();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showNearbyPopupOncePerRun();
     });
+  }
+
+  void _listenToSavedAttractions() {
+    _savedAttractionsSubscription?.cancel();
+
+    _savedAttractionsSubscription =
+        _savedAttractionsService
+            .watchSavedIds()
+            .listen(
+              (ids) {
+            if (!mounted) return;
+
+            setState(() {
+              _savedAttractionIds = ids;
+            });
+          },
+          onError: (error) {
+            debugPrint(
+              'Saved attractions listener error: $error',
+            );
+          },
+        );
+  }
+
+  Future<void> _toggleSavedAttraction(
+      AttractionModel attraction,
+      ) async {
+    try {
+      final bool isNowSaved =
+      await _savedAttractionsService.toggle(
+        attraction,
+      );
+
+      if (isNowSaved) {
+        await _personalizationController
+            .recordWishlist(
+          attraction,
+        );
+      }
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              isNowSaved
+                  ? '${attraction.name} saved.'
+                  : '${attraction.name} removed from saved.',
+            ),
+            backgroundColor: mainGreen,
+            duration:
+            const Duration(seconds: 2),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              FirebaseAuth.instance.currentUser ==
+                  null
+                  ? 'Please login before saving attractions.'
+                  : 'Unable to update saved attraction.',
+            ),
+            backgroundColor:
+            Colors.red.shade700,
+          ),
+        );
+    }
+  }
+
+  void _openSavedAttractions() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+        const SavedAttractionsPage(),
+      ),
+    );
   }
 
   Future<void> _loadProfile() async {
@@ -626,7 +724,7 @@ class _HomePageState extends State<HomePage> {
 
                 _sectionHeader(
                   title: 'Recommended for You',
-                  onViewAll: () {},
+                  onViewAll: _openAllRecommendations,
                 ),
 
                 const SizedBox(height: 9),
@@ -638,7 +736,6 @@ class _HomePageState extends State<HomePage> {
                 _sectionHeader(
                   title:
                   'Sustainable Travel Tips',
-                  onViewAll: () {},
                 ),
 
                 const SizedBox(height: 9),
@@ -694,18 +791,6 @@ class _HomePageState extends State<HomePage> {
             ),
 
             const Spacer(),
-
-            IconButton(
-              visualDensity:
-              VisualDensity.compact,
-              onPressed: () {},
-              icon: const Icon(
-                Icons
-                    .notifications_none_rounded,
-                size: 28,
-                color: textColor,
-              ),
-            ),
 
             const SizedBox(width: 1),
 
@@ -856,6 +941,19 @@ class _HomePageState extends State<HomePage> {
         builder: (_) => AttractionSearchPage(
           personalizationController:
           _personalizationController,
+        ),
+      ),
+    );
+  }
+
+  void _openAllRecommendations() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AttractionSearchPage(
+          personalizationController:
+          _personalizationController,
+          showRecommendationsInitially: true,
         ),
       ),
     );
@@ -1050,8 +1148,7 @@ class _HomePageState extends State<HomePage> {
                     child:
                     ElevatedButton(
                       onPressed:
-                      widget
-                          .onPlanTripTap,
+                      _openAiTripPlanner,
 
                       style:
                       ElevatedButton
@@ -1217,7 +1314,7 @@ class _HomePageState extends State<HomePage> {
               image:
               'assets/images/visa.png',
               title:
-              'Heritage Passport',
+              'Heritage\nPassport',
               color:
               const Color(
                 0xFFEDE5FA,
@@ -1235,7 +1332,7 @@ class _HomePageState extends State<HomePage> {
               const Color(
                 0xFFE8F3E9,
               ),
-              onTap: () {},
+              onTap: _openSavedAttractions,
             ),
           ),
         ],
@@ -1322,7 +1419,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _sectionHeader({
     required String title,
-    required VoidCallback onViewAll,
+    VoidCallback? onViewAll,
   }) {
     return Row(
       children: [
@@ -1341,33 +1438,44 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
 
-        const SizedBox(width: 8),
+        if (onViewAll != null) ...[
+          const SizedBox(width: 8),
 
-        InkWell(
-          onTap: onViewAll,
-          child: const Row(
-            mainAxisSize:
-            MainAxisSize.min,
-            children: [
-              Text(
-                'View All',
-                style: TextStyle(
-                  color: mainGreen,
-                  fontSize: 9,
-                  fontWeight:
-                  FontWeight.w500,
-                ),
+          InkWell(
+            onTap: onViewAll,
+            borderRadius:
+            BorderRadius.circular(8),
+            child: const Padding(
+              padding:
+              EdgeInsets.symmetric(
+                horizontal: 2,
+                vertical: 4,
               ),
-              SizedBox(width: 2),
-              Icon(
-                Icons
-                    .chevron_right_rounded,
-                color: mainGreen,
-                size: 14,
+              child: Row(
+                mainAxisSize:
+                MainAxisSize.min,
+                children: [
+                  Text(
+                    'View All',
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      color: mainGreen,
+                      fontWeight:
+                      FontWeight.w500,
+                    ),
+                  ),
+                  SizedBox(width: 1),
+                  Icon(
+                    Icons
+                        .chevron_right_rounded,
+                    size: 13,
+                    color: mainGreen,
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -1380,7 +1488,7 @@ class _HomePageState extends State<HomePage> {
     if (_controller.isLoading ||
         _personalizationController.isLoadingRecommendations) {
       return const SizedBox(
-        height: 99,
+        height: 132,
         child: Center(
           child:
           CircularProgressIndicator(
@@ -1416,7 +1524,7 @@ class _HomePageState extends State<HomePage> {
     }
 
     return SizedBox(
-      height: 99,
+      height: 132,
 
       child: ListView.separated(
         scrollDirection:
@@ -1562,12 +1670,35 @@ class _HomePageState extends State<HomePage> {
 
                 const SizedBox(width: 2),
 
-                const Icon(
-                  Icons
-                      .favorite_border_rounded,
-                  size: 12,
-                  color:
-                  Color(0xFF777777),
+                InkWell(
+                  onTap: () {
+                    _toggleSavedAttraction(
+                      attraction,
+                    );
+                  },
+                  borderRadius:
+                  BorderRadius.circular(20),
+                  child: Padding(
+                    padding:
+                    const EdgeInsets.all(2),
+                    child: Icon(
+                      _savedAttractionIds.contains(
+                        attraction.id,
+                      )
+                          ? Icons.favorite_rounded
+                          : Icons
+                          .favorite_border_rounded,
+                      size: 15,
+                      color:
+                      _savedAttractionIds.contains(
+                        attraction.id,
+                      )
+                          ? mainGreen
+                          : const Color(
+                        0xFF777777,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -1588,21 +1719,168 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
 
+            const SizedBox(height: 2),
+
+            _recommendationRating(
+              attraction.id,
+            ),
+
             const Spacer(),
 
-            Text(
-              attraction.categoryName.isEmpty
-                  ? 'Attraction'
-                  : attraction.categoryName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 6.5,
-                color: mainGreen,
-                fontWeight: FontWeight.w600,
+            SizedBox(
+              height: 19,
+              child: ListView.separated(
+                scrollDirection:
+                Axis.horizontal,
+                itemCount:
+                _categoryTags(attraction).length,
+                separatorBuilder:
+                    (_, __) =>
+                const SizedBox(width: 4),
+                itemBuilder:
+                    (context, index) {
+                  return _categoryChip(
+                    _categoryTags(
+                      attraction,
+                    )[index],
+                  );
+                },
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _recommendationRating(
+      String attractionId,
+      ) {
+    return AnimatedBuilder(
+      animation:
+      AttractionReviewsService.instance,
+      builder: (context, _) {
+        final service =
+            AttractionReviewsService.instance;
+
+        final double rating =
+        service.averageRatingFor(
+          attractionId,
+        );
+
+        final int reviewCount =
+        service.reviewCountFor(
+          attractionId,
+        );
+
+        if (rating <= 0 ||
+            reviewCount == 0) {
+          return const Row(
+            children: [
+              Icon(
+                Icons.star_border_rounded,
+                size: 10,
+                color: Color(0xFFFFB300),
+              ),
+              SizedBox(width: 2),
+              Text(
+                'Not rated yet',
+                style: TextStyle(
+                  fontSize: 6.1,
+                  color: secondaryText,
+                ),
+              ),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            const Icon(
+              Icons.star_rounded,
+              size: 10.5,
+              color: Color(0xFFFFB300),
+            ),
+            const SizedBox(width: 2),
+            Text(
+              rating.toStringAsFixed(1),
+              style: const TextStyle(
+                fontSize: 6.5,
+                fontWeight:
+                FontWeight.w700,
+                color: textColor,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Text(
+              '($reviewCount)',
+              style: const TextStyle(
+                fontSize: 5.8,
+                color: secondaryText,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  List<String> _categoryTags(
+      AttractionModel attraction,
+      ) {
+    final tags = attraction.categoryNames
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (tags.isNotEmpty) {
+      return tags;
+    }
+
+    final primary =
+    attraction.categoryName.trim();
+
+    if (primary.isNotEmpty) {
+      return [primary];
+    }
+
+    return ['Attraction'];
+  }
+
+  Widget _categoryChip(
+      String category,
+      ) {
+    return Container(
+      alignment:
+      Alignment.center,
+      padding:
+      const EdgeInsets.symmetric(
+        horizontal: 6,
+        vertical: 2,
+      ),
+      decoration: BoxDecoration(
+        color:
+        const Color(0xFFE8F5E9),
+        borderRadius:
+        BorderRadius.circular(10),
+        border: Border.all(
+          color:
+          const Color(0xFFC8E6C9),
+          width: 0.7,
+        ),
+      ),
+      child: Text(
+        category,
+        maxLines: 1,
+        overflow:
+        TextOverflow.ellipsis,
+        style:
+        const TextStyle(
+          fontSize: 6.2,
+          color: mainGreen,
+          fontWeight:
+          FontWeight.w600,
         ),
       ),
     );

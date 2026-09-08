@@ -1,3 +1,4 @@
+import 'package:collaborative_asg/views/saved_trip_plans_page.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -269,7 +270,7 @@ class _ProfilePageState extends State<ProfilePage> {
       MaterialPageRoute(
         builder: (_) => const LoginPage(),
       ),
-      (route) => false,
+          (route) => false,
     );
   }
 
@@ -536,7 +537,14 @@ class _ProfilePageState extends State<ProfilePage> {
                               icon: Icons.event_note_outlined,
                               label: 'My Trip Plans',
                               value: 'Saved multi-stop itineraries',
-                              onTap: _openTripPlans,
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const SavedTripPlansPage(),
+                                  ),
+                                );
+                              },
                             ),
                           ]),
 
