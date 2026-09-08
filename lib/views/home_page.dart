@@ -824,7 +824,7 @@ class _HomePageState extends State<HomePage> {
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            'Hello, ${_displayName()}!',
+            'Hello, ${_displayName()}! 👋',
             maxLines: 1,
             overflow:
             TextOverflow.ellipsis,
@@ -1248,20 +1248,16 @@ class _HomePageState extends State<HomePage> {
   Widget _quickAccess() {
     return Container(
       width: double.infinity,
-      padding:
-      const EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         vertical: 10,
         horizontal: 8,
       ),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-        BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(10),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(
-              alpha: 0.07,
-            ),
+            color: Colors.black.withValues(alpha: 0.07),
             blurRadius: 9,
             offset: const Offset(0, 2),
           ),
@@ -1270,16 +1266,14 @@ class _HomePageState extends State<HomePage> {
 
       child: Row(
         children: [
+          // =====================================================
+          // CULTURAL & HERITAGE
+          // =====================================================
           Expanded(
             child: _quickItem(
-              image:
-              'assets/images/court.png',
-              title:
-              'Cultural &\nHeritage',
-              color:
-              const Color(
-                0xFFEDE0F8,
-              ),
+              image: 'assets/images/court.png',
+              title: 'Cultural &\nHeritage',
+              color: const Color(0xFFEDE0F8),
               onTap: () {
                 Navigator.push(
                   context,
@@ -1291,51 +1285,35 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
+          // =====================================================
+          // SAVED - CENTER
+          // =====================================================
           Expanded(
             child: _quickItem(
-              image:
-              'assets/images/eco.png',
-              title:
-              'My Impact',
-              color:
-              const Color(
-                0xFFE4F4E6,
-              ),
-              onTap: () {},
+              icon: Icons.favorite_border,
+              title: 'Saved',
+              color: const Color(0xFFE8F3E9),
+              onTap: _openSavedAttractions,
             ),
           ),
 
+          // =====================================================
+          // HERITAGE PASSPORT
+          // =====================================================
           Expanded(
             child: _quickItem(
-              image:
-              'assets/images/visa.png',
-              title:
-              'Heritage\nPassport',
-              color:
-              const Color(
-                0xFFEDE5FA,
-              ),
+              image: 'assets/images/visa.png',
+              title: 'Heritage\nPassport',
+              color: const Color(0xFFEDE5FA),
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const GamificationHomePage(),
+                    builder: (context) =>
+                    const GamificationHomePage(),
                   ),
                 );
               },
-            ),
-          ),
-
-          Expanded(
-            child: _quickItem(
-              icon:
-              Icons.favorite_border,
-              title: 'Saved',
-              color:
-              const Color(
-                0xFFE8F3E9,
-              ),
-              onTap: _openSavedAttractions,
             ),
           ),
         ],

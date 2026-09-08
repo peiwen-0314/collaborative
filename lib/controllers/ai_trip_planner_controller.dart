@@ -256,6 +256,16 @@ class AiTripPlannerController extends ChangeNotifier {
   }
 
   Future<bool> generateTrip() async {
+    final stopwatch = Stopwatch()..start();
+
+    void perf(String stage) {
+      debugPrint(
+        '[TRIP PERFORMANCE] $stage: ${stopwatch.elapsedMilliseconds} ms',
+      );
+    }
+
+    debugPrint('========== TRIP GENERATION START ==========');
+
     if (!canGenerate) {
       _errorMessage =
       'Please complete destination, dates, travelers and at least one travel style.';
@@ -274,7 +284,10 @@ class AiTripPlannerController extends ChangeNotifier {
       notifyListeners();
 
       await _ensureAttractionsLoaded();
+      perf('Attractions loaded');
+
       await _loadUserPreferenceScores();
+      perf('User preference scores loaded');
 
       final selectedState =
       preferences.selectedState!.trim().toLowerCase();
@@ -330,7 +343,13 @@ class AiTripPlannerController extends ChangeNotifier {
       final recommendationPool =
       rankedCandidates.take(poolSize).toList();
 
+      perf(
+        'Recommendation ranking completed '
+            '(candidates: ${candidates.length}, pool: ${recommendationPool.length})',
+      );
+
       await _buildLogicalSchedule(recommendationPool);
+      perf('Logical schedule + HERE routing completed');
 
       _generatedAttractions = _generatedSchedule
           .map((item) => item.attraction)
@@ -343,8 +362,15 @@ class AiTripPlannerController extends ChangeNotifier {
         return false;
       }
 
+      perf(
+        'TOTAL generation completed '
+            '(scheduled: ${_generatedSchedule.length})',
+      );
+      debugPrint('========== TRIP GENERATION COMPLETE ==========');
+
       return true;
     } catch (e, stackTrace) {
+      perf('FAILED');
       debugPrint('Generate trip error: $e');
       debugPrint('$stackTrace');
 
@@ -619,6 +645,11 @@ class AiTripPlannerController extends ChangeNotifier {
     for (int dayIndex = 0;
     dayIndex < totalDays;
     dayIndex++) {
+      final dayStopwatch = Stopwatch()..start();
+      debugPrint(
+        '[TRIP PERFORMANCE] Day ${dayIndex + 1} scheduling started',
+      );
+
       if (remaining.isEmpty) {
         break;
       }
@@ -671,6 +702,8 @@ class AiTripPlannerController extends ChangeNotifier {
       if (allHaveCoordinates &&
           dailyCandidates.length >= 2) {
         try {
+          final matrixStopwatch = Stopwatch()..start();
+
           matrix =
           await _hereMatrixRoutingService
               .calculateCarMatrix(
@@ -692,6 +725,12 @@ class AiTripPlannerController extends ChangeNotifier {
             departureTime:
             dayStart,
           );
+
+          debugPrint(
+            '[TRIP PERFORMANCE] Day ${dayIndex + 1} HERE Matrix: '
+                '${matrixStopwatch.elapsedMilliseconds} ms '
+                '(${dailyCandidates.length} candidates)',
+          );
         } catch (e) {
           debugPrint(
             'HERE Matrix unavailable for '
@@ -699,6 +738,8 @@ class AiTripPlannerController extends ChangeNotifier {
           );
         }
       }
+
+      final optimizationStopwatch = Stopwatch()..start();
 
       final optimized =
       _findBestDailySequence(
@@ -709,6 +750,11 @@ class AiTripPlannerController extends ChangeNotifier {
         dayEnd: dayEnd,
         usedBudgetBeforeDay:
         usedBudget,
+      );
+
+      debugPrint(
+        '[TRIP PERFORMANCE] Day ${dayIndex + 1} local optimization: '
+            '${optimizationStopwatch.elapsedMilliseconds} ms',
       );
 
       if (optimized == null ||
@@ -866,6 +912,12 @@ class AiTripPlannerController extends ChangeNotifier {
             scheduledIds.contains(
               candidate.attraction.id,
             ),
+      );
+
+      debugPrint(
+        '[TRIP PERFORMANCE] Day ${dayIndex + 1} TOTAL: '
+            '${dayStopwatch.elapsedMilliseconds} ms '
+            '(scheduled ${scheduledIds.length} attractions)',
       );
     }
   }
@@ -1212,6 +1264,8 @@ class AiTripPlannerController extends ChangeNotifier {
     }
 
     try {
+      final routeStopwatch = Stopwatch()..start();
+
       final route =
       await _hereRoutingService.getCarRoute(
         originLatitude:
@@ -1224,6 +1278,12 @@ class AiTripPlannerController extends ChangeNotifier {
         to.longitude,
         departureTime:
         departureTime,
+      );
+
+      debugPrint(
+        '[TRIP PERFORMANCE] HERE Route '
+            '${from.name} -> ${to.name}: '
+            '${routeStopwatch.elapsedMilliseconds} ms',
       );
 
       _routeCache[cacheKey] =

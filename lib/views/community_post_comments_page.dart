@@ -3,11 +3,10 @@ import 'package:flutter/material.dart';
 
 import '../models/community_post.dart';
 import '../services/community_feed_service.dart';
-import '../services/profanity_filter_service.dart';
+import '../services/review_moderation_service.dart';
 
-/// Comment thread for a [CommunityPost]. Mirrors ReviewCommentsPage - same
-/// filter-on-submit pattern, applied here to the general feed instead of
-/// attraction reviews.
+/// Comment thread for a [CommunityPost]. Uses the same API content
+/// moderation service as attraction reviews before saving comments.
 class CommunityPostCommentsPage extends StatefulWidget {
   const CommunityPostCommentsPage({super.key, required this.post});
 
@@ -23,6 +22,7 @@ class _CommunityPostCommentsPageState extends State<CommunityPostCommentsPage> {
 
   final TextEditingController _commentController = TextEditingController();
   String? _errorText;
+  bool _submittingComment = false;
 
   @override
   void dispose() {
@@ -32,34 +32,60 @@ class _CommunityPostCommentsPageState extends State<CommunityPostCommentsPage> {
 
   Future<void> _submitComment() async {
     final text = _commentController.text.trim();
-    if (text.isEmpty) return;
 
-    final result = await ProfanityFilterService.check(text);
-    if (!mounted) return;
-    if (result.errorMessage != null) {
-      setState(() => _errorText = result.errorMessage);
+    if (text.isEmpty || _submittingComment) {
       return;
     }
-    if (result.isFlagged) {
-      setState(() {
-        _errorText =
-            "That comment contains language that isn't allowed. Please rephrase.";
-      });
-      return;
-    }
+
+    setState(() {
+      _submittingComment = true;
+      _errorText = null;
+    });
 
     try {
+      // =====================================================
+      // 1. API CONTENT MODERATION
+      // =====================================================
+      final moderationResult =
+      await ReviewModerationService.instance.moderate(text);
+
+      if (!mounted) return;
+
+      if (!moderationResult.allowed) {
+        setState(() {
+          _submittingComment = false;
+          _errorText =
+          moderationResult.source == 'google-moderation'
+              ? 'That comment contains inappropriate content. Please rephrase.'
+              : (moderationResult.message.isNotEmpty
+              ? moderationResult.message
+              : 'Unable to check this comment right now. Please try again.');
+        });
+        return;
+      }
+
+      // =====================================================
+      // 2. MODERATION PASSED -> SAVE COMMENT
+      // =====================================================
       await CommunityFeedService.instance.addComment(
         widget.post.id,
         authorName: 'You',
         text: text,
       );
+
       if (!mounted) return;
+
       _commentController.clear();
-      setState(() => _errorText = null);
+
+      setState(() {
+        _submittingComment = false;
+        _errorText = null;
+      });
     } catch (error) {
       if (!mounted) return;
+
       setState(() {
+        _submittingComment = false;
         _errorText = error is StateError
             ? error.message.toString()
             : 'Unable to save your comment. Please try again.';
@@ -87,25 +113,25 @@ class _CommunityPostCommentsPageState extends State<CommunityPostCommentsPage> {
 
   Future<bool> _confirmDeletion(String title) async {
     return await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: Text(title),
-            content: const Text('This action cannot be undone.'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red,
-                ),
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Delete'),
-              ),
-            ],
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: const Text('This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
           ),
-        ) ??
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    ) ??
         false;
   }
 
@@ -126,7 +152,7 @@ class _CommunityPostCommentsPageState extends State<CommunityPostCommentsPage> {
               animation: service,
               builder: (context, _) {
                 final current = service.posts.firstWhere(
-                  (post) => post.id == widget.post.id,
+                      (post) => post.id == widget.post.id,
                   orElse: () => widget.post,
                 );
                 return ListView(
@@ -150,7 +176,7 @@ class _CommunityPostCommentsPageState extends State<CommunityPostCommentsPage> {
                         ),
                       ),
                     ...current.comments.map(
-                      (comment) => Padding(
+                          (comment) => Padding(
                         padding: const EdgeInsets.only(bottom: 14),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -262,8 +288,21 @@ class _CommunityPostCommentsPageState extends State<CommunityPostCommentsPage> {
                         ),
                       ),
                       IconButton(
-                        onPressed: _submitComment,
-                        icon: const Icon(Icons.send, color: green),
+                        onPressed:
+                        _submittingComment ? null : _submitComment,
+                        icon: _submittingComment
+                            ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: green,
+                          ),
+                        )
+                            : const Icon(
+                          Icons.send,
+                          color: green,
+                        ),
                       ),
                     ],
                   ),

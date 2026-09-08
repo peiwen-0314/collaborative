@@ -11,6 +11,7 @@ import '../models/transport_mode.dart';
 import '../models/location_point.dart';
 import '../services/location_service.dart';
 import 'attraction_detail_page.dart';
+import 'edit_saved_trip_plan_page.dart';
 import 'trip_details_page.dart';
 
 TransportMode _dominantLegMode(RideOption option) {
@@ -631,7 +632,7 @@ class _SavedTripPlanDetailPageState
   int selectedDay = 0;
 
   final TransportController _transportController =
-      TransportController();
+  TransportController();
   final LocationService _locationService = const LocationService();
   Map<String, PlannedPlanLeg> _legsByKey = {};
   List<PlannedPlanLeg> _legs = [];
@@ -657,7 +658,7 @@ class _SavedTripPlanDetailPageState
     } catch (error) {
       debugPrint(
         '[SavedTripPlanDetailPage] loading saved transport failed: '
-        '$error',
+            '$error',
       );
     }
 
@@ -689,7 +690,7 @@ class _SavedTripPlanDetailPageState
     });
     try {
       final plan =
-          SavedTripPlan.fromFirestore(widget.planId, widget.data);
+      SavedTripPlan.fromFirestore(widget.planId, widget.data);
       if (plan.attractions.isEmpty) {
         if (!mounted) return;
         setState(() => _computingTransport = false);
@@ -697,7 +698,7 @@ class _SavedTripPlanDetailPageState
       }
 
       final locationResult =
-          await _locationService.detectCurrentLocation();
+      await _locationService.detectCurrentLocation();
       if (!mounted) return;
 
       final startingFrom = locationResult.point;
@@ -705,7 +706,7 @@ class _SavedTripPlanDetailPageState
         setState(() {
           _computingTransport = false;
           _transportError =
-              "Couldn't detect your current location, so real "
+          "Couldn't detect your current location, so real "
               'transportation routes could not be planned for this '
               'trip.';
         });
@@ -713,7 +714,7 @@ class _SavedTripPlanDetailPageState
       }
 
       final computedLegs =
-          await _transportController.planTransportationForPlan(
+      await _transportController.planTransportationForPlan(
         plan,
         startingFrom: startingFrom,
       );
@@ -740,7 +741,7 @@ class _SavedTripPlanDetailPageState
     } catch (error) {
       debugPrint(
         '[SavedTripPlanDetailPage] computing transport failed: '
-        '$error',
+            '$error',
       );
       if (!mounted) return;
       setState(() {
@@ -781,7 +782,7 @@ class _SavedTripPlanDetailPageState
     } catch (error) {
       debugPrint(
         '[SavedTripPlanDetailPage] re-saving transport plan failed: '
-        '$error',
+            '$error',
       );
     }
   }
@@ -854,9 +855,9 @@ class _SavedTripPlanDetailPageState
   }
 
   Future<PlannedPlanLeg?> _applyRetriedLeg(
-    int index,
-    LocationPoint from,
-  ) async {
+      int index,
+      LocationPoint from,
+      ) async {
     if (index < 0 || index >= _legs.length) return null;
     final leg = _legs[index];
     final attraction = _attractionForLeg(leg);
@@ -900,9 +901,9 @@ class _SavedTripPlanDetailPageState
   }
 
   Future<PlannedPlanLeg?> _searchAndRetryLeg(
-    int index,
-    String query,
-  ) async {
+      int index,
+      String query,
+      ) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return null;
     final point = await _locationService.searchPlace(trimmed);
@@ -919,7 +920,7 @@ class _SavedTripPlanDetailPageState
         const SnackBar(
           content: Text(
             "Couldn't get your location - search a starting point "
-            'instead.',
+                'instead.',
           ),
         ),
       );
@@ -987,6 +988,35 @@ class _SavedTripPlanDetailPageState
             color: textColor,
           ),
         ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => EditSavedTripPlanPage(
+                    planId: widget.planId,
+                    initialData: widget.data,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(
+              Icons.edit_outlined,
+              size: 16,
+              color: mainGreen,
+            ),
+            label: const Text(
+              'Edit',
+              style: TextStyle(
+                color: mainGreen,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -1027,7 +1057,7 @@ class _SavedTripPlanDetailPageState
                       const Expanded(
                         child: Text(
                           'Planning real transportation for this '
-                          'trip...',
+                              'trip...',
                           style: TextStyle(
                             fontSize: 11,
                             color: mainGreen,
@@ -1308,7 +1338,7 @@ class _SavedTripPlanDetailPageState
     // Prefer the real leg's own computed arrival time - it accounts
     // for actual travel time, unlike the old saved estimate.
     final start =
-    leg?.visitStart ?? _timestamp(attraction['startTime']);
+        leg?.visitStart ?? _timestamp(attraction['startTime']);
 
     final end =
     _timestamp(attraction['endTime']);
@@ -1406,51 +1436,51 @@ class _SavedTripPlanDetailPageState
                         ? null
                         : () => _openLegDetail(legIndex),
                     child: Container(
-                    margin: const EdgeInsets.only(bottom: 7),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF5F7F5),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        transportModeGlyph(
-                          _dominantLegMode(legOption),
-                          size: 12,
-                          color: mainGreen,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${formatDuration(legOption.totalDuration)}'
-                          ' • '
-                          '${legOption.co2Kg.toStringAsFixed(2)} kg CO2',
-                          style: const TextStyle(
-                            fontSize: 7.5,
+                      margin: const EdgeInsets.only(bottom: 7),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF5F7F5),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          transportModeGlyph(
+                            _dominantLegMode(legOption),
+                            size: 12,
                             color: mainGreen,
-                            fontWeight: FontWeight.w600,
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _dominantLegMode(legOption).label,
-                          style: const TextStyle(
-                            fontSize: 6.5,
-                            color: secondaryText,
+                          const SizedBox(width: 4),
+                          Text(
+                            '${formatDuration(legOption.totalDuration)}'
+                                ' • '
+                                '${legOption.co2Kg.toStringAsFixed(2)} kg CO2',
+                            style: const TextStyle(
+                              fontSize: 7.5,
+                              color: mainGreen,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          size: 13,
-                          color: mainGreen.withOpacity(0.6),
-                        ),
-                      ],
+                          const SizedBox(width: 4),
+                          Text(
+                            _dominantLegMode(legOption).label,
+                            style: const TextStyle(
+                              fontSize: 6.5,
+                              color: secondaryText,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            size: 13,
+                            color: mainGreen.withOpacity(0.6),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                   )
                 else if (transportMinutes != null &&
                     transportMinutes > 0)

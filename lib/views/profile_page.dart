@@ -10,6 +10,7 @@ import '../widgets/eco_bottom_navigation.dart';
 import 'about_eco_travel_page.dart';
 import 'ai_trip_planner_page.dart';
 import 'change_password_page.dart';
+import 'community_feed_page.dart';
 import 'home_page.dart';
 import 'login_page.dart';
 import 'ride_home_page.dart';
@@ -619,7 +620,12 @@ class _ProfilePageState extends State<ProfilePage> {
           );
         },
         onCommunityTap: () {
-          _showComingSoon('Community');
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const CommunityFeedPage(),
+            ),
+          );
         },
         onProfileTap: () {
           // Already on Profile page.

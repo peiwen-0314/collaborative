@@ -1,3 +1,4 @@
+import 'package:collaborative_asg/views/profile_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -60,10 +61,12 @@ class _CommunityFeedPageState extends State<CommunityFeedPage> {
     );
   }
 
-  void _openReviews() {
-    Navigator.push(
+  void _openProfile() {
+    Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => const AttractionReviewsListPage()),
+      MaterialPageRoute(
+        builder: (_) => const ProfilePage(),
+      ),
     );
   }
 
@@ -108,51 +111,42 @@ class _CommunityFeedPageState extends State<CommunityFeedPage> {
             child: Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
+                  padding: EdgeInsets.fromLTRB(14, 8, 18, 10),
                   child: Row(
                     children: [
-                      const Icon(Icons.luggage_rounded, color: green, size: 25),
                       Transform.translate(
-                        offset: const Offset(-7, 7),
-                        child: const Icon(Icons.eco, color: green, size: 17),
-                      ),
-                      const Text(
-                        'EcoTravel',
-                        style: TextStyle(
-                          color: green,
-                          fontSize: 21,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.5,
+                        offset: const Offset(-7, 0),
+                        child: Image.asset(
+                          'assets/images/logo.png',
+                          height: 55,
+                          fit: BoxFit.contain,
                         ),
                       ),
+
                       const Spacer(),
                     ],
                   ),
                 ),
-                CommunitySectionSwitcher(
-                  showingReviews: false,
-                  onCommunityTap: () {},
-                  onReviewsTap: _openReviews,
-                ),
                 const Padding(
-                  padding: EdgeInsets.fromLTRB(18, 8, 18, 10),
+                  padding: EdgeInsets.fromLTRB(14, 8, 18, 10),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'Community 🌱',
                         style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: green,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF2E7D32),
                         ),
                       ),
-                      SizedBox(height: 2),
+                      SizedBox(height: 3),
                       Text(
                         'Share experiences, tips and inspire responsible travel',
                         style: TextStyle(
-                          fontSize: 12.5,
-                          color: Colors.black54,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w400,
+                          color: Color(0xFF777777),
                         ),
                       ),
                     ],
@@ -161,7 +155,7 @@ class _CommunityFeedPageState extends State<CommunityFeedPage> {
                 SizedBox(
                   height: 46,
                   child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
+                    padding: const EdgeInsets.fromLTRB(14, 4, 18, 8),
                     scrollDirection: Axis.horizontal,
                     itemCount: categoryNames.length + 1,
                     separatorBuilder: (_, __) => const SizedBox(width: 8),
@@ -247,7 +241,7 @@ class _CommunityFeedPageState extends State<CommunityFeedPage> {
         onCommunityTap: () {
           // Already on the Community page.
         },
-        onProfileTap: () => _showComingSoon('Profile'),
+        onProfileTap: _openProfile,
       ),
     );
   }

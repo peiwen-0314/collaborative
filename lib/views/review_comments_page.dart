@@ -3,12 +3,11 @@ import 'package:flutter/material.dart';
 
 import '../models/attraction_review.dart';
 import '../services/attraction_reviews_service.dart';
-import '../services/profanity_filter_service.dart';
+import '../services/review_moderation_service.dart';
 
 /// Shows the original review for context, its comment thread, and an
-/// add-comment box. Every submitted comment is run through
-/// [ProfanityFilterService.check] before being saved - the same filter used
-/// for reviews, applied here as well.
+/// add-comment box. Every submitted comment is checked using the same
+/// API moderation service as attraction reviews before being saved.
 class ReviewCommentsPage extends StatefulWidget {
   const ReviewCommentsPage({
     super.key,
@@ -28,6 +27,7 @@ class _ReviewCommentsPageState extends State<ReviewCommentsPage> {
 
   final TextEditingController _commentController = TextEditingController();
   String? _errorText;
+  bool _submittingComment = false;
 
   @override
   void dispose() {
@@ -37,35 +37,61 @@ class _ReviewCommentsPageState extends State<ReviewCommentsPage> {
 
   Future<void> _submitComment() async {
     final text = _commentController.text.trim();
-    if (text.isEmpty) return;
 
-    final result = await ProfanityFilterService.check(text);
-    if (!mounted) return;
-    if (result.errorMessage != null) {
-      setState(() => _errorText = result.errorMessage);
+    if (text.isEmpty || _submittingComment) {
       return;
     }
-    if (result.isFlagged) {
-      setState(() {
-        _errorText =
-            "That comment contains language that isn't allowed. Please rephrase.";
-      });
-      return;
-    }
+
+    setState(() {
+      _submittingComment = true;
+      _errorText = null;
+    });
 
     try {
+      // =====================================================
+      // 1. API CONTENT MODERATION
+      // =====================================================
+      final moderationResult =
+      await ReviewModerationService.instance.moderate(text);
+
+      if (!mounted) return;
+
+      if (!moderationResult.allowed) {
+        setState(() {
+          _submittingComment = false;
+          _errorText =
+          moderationResult.source == 'google-moderation'
+              ? 'That comment contains inappropriate content. Please rephrase.'
+              : (moderationResult.message.isNotEmpty
+              ? moderationResult.message
+              : 'Unable to check this comment right now. Please try again.');
+        });
+        return;
+      }
+
+      // =====================================================
+      // 2. MODERATION PASSED -> SAVE COMMENT
+      // =====================================================
       await AttractionReviewsService.instance.addComment(
         widget.attractionId,
         widget.review.id,
         authorName: 'You',
         text: text,
       );
+
       if (!mounted) return;
+
       _commentController.clear();
-      setState(() => _errorText = null);
+
+      setState(() {
+        _submittingComment = false;
+        _errorText = null;
+      });
     } catch (error) {
       if (!mounted) return;
+
       setState(() {
+        _submittingComment = false;
         _errorText = error is StateError
             ? error.message.toString()
             : 'Unable to save your comment. Please try again.';
@@ -128,7 +154,7 @@ class _ReviewCommentsPageState extends State<ReviewCommentsPage> {
               builder: (context, _) {
                 final currentReviews = service.reviewsFor(widget.attractionId);
                 final current = currentReviews.firstWhere(
-                  (r) => r.id == widget.review.id,
+                      (r) => r.id == widget.review.id,
                   orElse: () => widget.review,
                 );
                 return ListView(
@@ -155,7 +181,7 @@ class _ReviewCommentsPageState extends State<ReviewCommentsPage> {
                         ),
                       ),
                     ...current.comments.map(
-                      (comment) => Padding(
+                          (comment) => Padding(
                         padding: const EdgeInsets.only(bottom: 14),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -270,8 +296,21 @@ class _ReviewCommentsPageState extends State<ReviewCommentsPage> {
                         ),
                       ),
                       IconButton(
-                        onPressed: _submitComment,
-                        icon: const Icon(Icons.send, color: green),
+                        onPressed:
+                        _submittingComment ? null : _submitComment,
+                        icon: _submittingComment
+                            ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: green,
+                          ),
+                        )
+                            : const Icon(
+                          Icons.send,
+                          color: green,
+                        ),
                       ),
                     ],
                   ),
@@ -325,7 +364,7 @@ class _OriginalReview extends StatelessWidget {
                   Row(
                     children: List.generate(
                       5,
-                      (i) => Icon(
+                          (i) => Icon(
                         i < review.rating ? Icons.star : Icons.star_border,
                         size: 12,
                         color: Colors.amber,

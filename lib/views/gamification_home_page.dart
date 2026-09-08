@@ -106,54 +106,6 @@ class _GamificationHomePageState extends State<GamificationHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      bottomNavigationBar: EcoBottomNavigation(
-        currentIndex: -1,
-
-        onHomeTap: () {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const HomePage(),
-            ),
-          );
-        },
-
-        onTransportTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const TransportationPage(),
-            ),
-          );
-        },
-
-        onPlanTripTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const AiTripPlannerPage(),
-            ),
-          );
-        },
-
-        onCommunityTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const CommunityFeedPage(),
-            ),
-          );
-        },
-
-        onProfileTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const ProfilePage(),
-            ),
-          );
-        },
-      ),
       body: SafeArea(
         bottom: false,
         child: StreamBuilder<GamificationSummary>(
@@ -177,7 +129,7 @@ class _GamificationHomePageState extends State<GamificationHomePage> {
               slivers: [
                 SliverToBoxAdapter(child: _buildHeader(summary)),
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 24),
                   // sliver: SliverList.list(
                   //   children: [
                   //     const SizedBox(height: 16),
@@ -232,18 +184,35 @@ class _GamificationHomePageState extends State<GamificationHomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // =====================================================
+        // LOGO - SAME STYLE AS HOME PAGE
+        // =====================================================
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 14),
-          child: Image.asset(
-            AppAssets.logo,
-            width: 152,
-            height: 44,
-            fit: BoxFit.contain,
-            alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.fromLTRB(
+            18,
+            12,
+            18,
+            0,
+          ),
+          child: Row(
+            children: [
+              Transform.translate(
+                offset: const Offset(-7, 0),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  height: 55,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ],
           ),
         ),
+
+        // =====================================================
+        // GAMIFICATION BANNER
+        // =====================================================
         SizedBox(
-          height: 270,
+          height: 190,
           width: double.infinity,
           child: Stack(
             fit: StackFit.expand,
@@ -256,36 +225,54 @@ class _GamificationHomePageState extends State<GamificationHomePage> {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
-                      colors: [Color(0xFFF7FCFF), Color(0xFFB9CF91)],
+                      colors: [
+                        Color(0xFFF7FCFF),
+                        Color(0xFFB9CF91),
+                      ],
                     ),
                   ),
                   child: const Align(
                     alignment: Alignment.bottomRight,
                     child: Padding(
-                      padding: EdgeInsets.all(28),
-                      child: Icon(Icons.hiking, size: 112, color: Color(0xFF3F7E3B)),
+                      padding: EdgeInsets.all(20),
+                      child: Icon(
+                        Icons.hiking,
+                        size: 85,
+                        color: Color(0xFF3F7E3B),
+                      ),
                     ),
                   ),
                 ),
               ),
+
               Padding(
-                padding: const EdgeInsets.fromLTRB(34, 24, 20, 0),
+                padding: const EdgeInsets.fromLTRB(
+                  22,
+                  18,
+                  18,
+                  0,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'Hello, ${summary.userName}! 👋',
                       style: const TextStyle(
-                        fontSize: 25,
+                        fontSize: 19,
                         height: 1.1,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF1F1F1F),
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF212121),
                       ),
                     ),
-                    const SizedBox(height: 6),
+
+                    const SizedBox(height: 4),
+
                     const Text(
                       'Keep exploring, keep the planet green!',
-                      style: TextStyle(fontSize: 14, color: Color(0xFF2D2D2D)),
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        color: Color(0xFF777777),
+                      ),
                     ),
                   ],
                 ),
@@ -521,22 +508,17 @@ class _GamificationHomePageState extends State<GamificationHomePage> {
 
     return SizedBox(
       height: 102,
-      child: Row(
-        children: [
-          _ArrowButton(icon: Icons.chevron_left, onTap: () => _scrollShortcuts(-150)),
-          const SizedBox(width: 4),
-          Expanded(
-            child: ListView.separated(
-              controller: _shortcutController,
-              scrollDirection: Axis.horizontal,
-              itemCount: shortcuts.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 6),
-              itemBuilder: (context, index) => _ShortcutCard(data: shortcuts[index]),
-            ),
-          ),
-          const SizedBox(width: 4),
-          _ArrowButton(icon: Icons.chevron_right, onTap: () => _scrollShortcuts(150)),
-        ],
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        itemCount: shortcuts.length,
+        separatorBuilder: (_, __) =>
+        const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          return _ShortcutCard(
+            data: shortcuts[index],
+          );
+        },
       ),
     );
   }
@@ -865,7 +847,7 @@ class _ShortcutCard extends StatelessWidget {
               data.label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, decoration: TextDecoration.underline),
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
             ),
           ],
         ),

@@ -15,6 +15,8 @@ import '../models/trip_schedule_item.dart';
 import '../services/location_service.dart';
 import 'attraction_detail_page.dart';
 import 'ai_trip_planner_page.dart';
+import 'home_page.dart';
+import 'saved_trip_plans_page.dart';
 import 'trip_details_page.dart';
 import 'trip_location_date_page.dart';
 
@@ -126,12 +128,12 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     try {
       final preferences = widget.controller.preferences;
       final totalDays =
-          preferences.totalDays <= 0 ? 1 : preferences.totalDays;
+      preferences.totalDays <= 0 ? 1 : preferences.totalDays;
 
       final attractions = <SavedTripPlanAttraction>[];
       for (var dayIndex = 0; dayIndex < totalDays; dayIndex++) {
         for (final attraction
-            in widget.controller.attractionsForDay(dayIndex)) {
+        in widget.controller.attractionsForDay(dayIndex)) {
           attractions.add(
             SavedTripPlanAttraction(
               name: attraction.name,
@@ -181,7 +183,7 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
           _transportLoading = false;
           _transportInitialComputeDone = true;
           _transportError =
-              "Couldn't detect your current location, so real "
+          "Couldn't detect your current location, so real "
               'transportation routes could not be planned for this trip.';
         });
         return;
@@ -300,7 +302,7 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
   SavedTripPlanAttraction? _attractionForLeg(PlannedPlanLeg leg) {
     final preferences = widget.controller.preferences;
     final totalDays =
-        preferences.totalDays <= 0 ? 1 : preferences.totalDays;
+    preferences.totalDays <= 0 ? 1 : preferences.totalDays;
     final dayIndex = leg.day - 1;
     if (dayIndex < 0 || dayIndex >= totalDays) return null;
 
@@ -321,9 +323,9 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
   }
 
   Future<PlannedPlanLeg?> _applyRetriedLeg(
-    int index,
-    LocationPoint from,
-  ) async {
+      int index,
+      LocationPoint from,
+      ) async {
     final legs = _transportLegs;
     if (legs == null || index < 0 || index >= legs.length) return null;
     final leg = legs[index];
@@ -659,7 +661,7 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
                   const SizedBox(height: 8),
                   const Text(
                     "Please don't exit while we finish generating your "
-                    'trip.',
+                        'trip.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 12,
@@ -1054,39 +1056,39 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: retrying
                                 ? const [
-                                    SizedBox(
-                                      width: 10,
-                                      height: 10,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 1.4,
-                                        color: Colors.orange,
-                                      ),
-                                    ),
-                                    SizedBox(width: 6),
-                                    Text(
-                                      'Retrying...',
-                                      style: TextStyle(
-                                        fontSize: 7.5,
-                                        color: Colors.orange,
-                                      ),
-                                    ),
-                                  ]
+                              SizedBox(
+                                width: 10,
+                                height: 10,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.4,
+                                  color: Colors.orange,
+                                ),
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                'Retrying...',
+                                style: TextStyle(
+                                  fontSize: 7.5,
+                                  color: Colors.orange,
+                                ),
+                              ),
+                            ]
                                 : [
-                                    const Icon(
-                                      Icons.error_outline,
-                                      size: 12,
-                                      color: Colors.orange,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'No real route found - tap to retry',
-                                      style: TextStyle(
-                                        fontSize: 7.5,
-                                        color: Colors.orange.shade800,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
+                              const Icon(
+                                Icons.error_outline,
+                                size: 12,
+                                color: Colors.orange,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'No real route found - tap to retry',
+                                style: TextStyle(
+                                  fontSize: 7.5,
+                                  color: Colors.orange.shade800,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       );
@@ -1632,12 +1634,15 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
 
       if (!mounted) return;
 
-      setState(() {
-        _isSaved = true;
-        _savedPlanId = doc.id;
-      });
+      _savedPlanId = doc.id;
 
-      _showMessage('Trip plan saved successfully!');
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const SavedTripPlansPage(),
+        ),
+            (route) => false,
+      );
     } catch (e) {
       debugPrint('Toggle save trip plan error: $e');
 
@@ -1716,10 +1721,9 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-        const AiTripPlannerPage(),
+        builder: (_) => const HomePage(),
       ),
-          (route) => route.isFirst,
+          (route) => false,
     );
   }
 
@@ -1851,3 +1855,4 @@ TransportMode _dominantLegMode(RideOption option) {
   }
   return majority;
 }
+

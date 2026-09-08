@@ -82,14 +82,17 @@ class _TripTravelStylePageState
           ),
         ),
       );
-
       return;
     }
+
+    setState(() {});
 
     final ok =
     await widget.controller.generateTrip();
 
     if (!mounted) return;
+
+    setState(() {});
 
     if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -101,7 +104,6 @@ class _TripTravelStylePageState
           backgroundColor: Colors.red.shade700,
         ),
       );
-
       return;
     }
 
@@ -255,12 +257,12 @@ class _TripTravelStylePageState
                         // 3 cards in one row
                         crossAxisCount: 3,
 
-                        crossAxisSpacing: 6,
+                        crossAxisSpacing: 8,
 
-                        mainAxisSpacing: 7,
+                        mainAxisSpacing: 8,
 
-                        // Smaller card
-                        childAspectRatio: 1.15,
+                        // Give cards enough height for full text.
+                        mainAxisExtent: 165,
                       ),
 
                       itemBuilder:
@@ -299,80 +301,102 @@ class _TripTravelStylePageState
                 10,
               ),
 
-              child: SizedBox(
-                width: double.infinity,
-                height: 42,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    height: 42,
 
-                child: ElevatedButton(
-                  onPressed:
-                  widget.controller.isLoading
-                      ? null
-                      : _generate,
+                    child: ElevatedButton(
+                      onPressed:
+                      widget.controller.isLoading
+                          ? null
+                          : _generate,
 
-                  style:
-                  ElevatedButton.styleFrom(
-                    backgroundColor: mainGreen,
+                      style:
+                      ElevatedButton.styleFrom(
+                        backgroundColor: mainGreen,
 
-                    foregroundColor:
-                    Colors.white,
+                        foregroundColor:
+                        Colors.white,
 
-                    elevation: 0,
+                        elevation: 0,
 
-                    shape:
-                    RoundedRectangleBorder(
-                      borderRadius:
-                      BorderRadius.circular(
-                        6,
-                      ),
-                    ),
-                  ),
-
-                  child:
-                  widget.controller.isLoading
-
-                      ? const SizedBox(
-                    width: 18,
-                    height: 18,
-
-                    child:
-                    CircularProgressIndicator(
-                      color:
-                      Colors.white,
-                      strokeWidth: 2,
-                    ),
-                  )
-
-                      : const Row(
-                    mainAxisAlignment:
-                    MainAxisAlignment
-                        .center,
-
-                    mainAxisSize:
-                    MainAxisSize.min,
-
-                    children: [
-
-                      Text(
-                        'Next: Generate My Trip',
-                        style:
-                        TextStyle(
-                          fontSize: 11,
-                          fontWeight:
-                          FontWeight
-                              .w500,
+                        shape:
+                        RoundedRectangleBorder(
+                          borderRadius:
+                          BorderRadius.circular(
+                            6,
+                          ),
                         ),
                       ),
 
-                      SizedBox(width: 7),
+                      child:
+                      widget.controller.isLoading
 
-                      Icon(
-                        Icons
-                            .arrow_forward_ios_rounded,
-                        size: 11,
+                          ? const Row(
+                        mainAxisAlignment:
+                        MainAxisAlignment.center,
+
+                        mainAxisSize:
+                        MainAxisSize.min,
+
+                        children: [
+                          SizedBox(
+                            width: 17,
+                            height: 17,
+                            child:
+                            CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                          SizedBox(width: 10),
+                          Text(
+                            'Generating your trip...',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight:
+                              FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      )
+
+                          : const Row(
+                        mainAxisAlignment:
+                        MainAxisAlignment
+                            .center,
+
+                        mainAxisSize:
+                        MainAxisSize.min,
+
+                        children: [
+
+                          Text(
+                            'Next: Generate My Trip',
+                            style:
+                            TextStyle(
+                              fontSize: 11,
+                              fontWeight:
+                              FontWeight
+                                  .w500,
+                            ),
+                          ),
+
+                          SizedBox(width: 7),
+
+                          Icon(
+                            Icons
+                                .arrow_forward_ios_rounded,
+                            size: 11,
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
           ],
@@ -517,13 +541,16 @@ class _TripTravelStylePageState
             Text(
               style,
 
-              maxLines: 1,
+              maxLines: 2,
+
+              softWrap: true,
 
               overflow:
-              TextOverflow.ellipsis,
+              TextOverflow.visible,
 
               style: const TextStyle(
-                fontSize: 8.3,
+                fontSize: 9,
+                height: 1.15,
                 fontWeight:
                 FontWeight.w700,
               ),
@@ -539,15 +566,15 @@ class _TripTravelStylePageState
               child: Text(
                 desc[style] ?? '',
 
-                maxLines: 5,
+                softWrap: true,
 
                 overflow:
-                TextOverflow.ellipsis,
+                TextOverflow.visible,
 
                 style: const TextStyle(
-                  fontSize: 6.9,
+                  fontSize: 7.2,
 
-                  height: 1.22,
+                  height: 1.25,
 
                   color:
                   Color(0xFF777777),
