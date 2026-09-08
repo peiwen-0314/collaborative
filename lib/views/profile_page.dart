@@ -1,3 +1,4 @@
+import 'package:collaborative_asg/views/saved_trip_plans_page.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -9,7 +10,7 @@ import '../models/user.dart';
 import '../widgets/eco_bottom_navigation.dart';
 import 'about_eco_travel_page.dart';
 import 'ai_trip_planner_page.dart';
-import 'edit_interests_page.dart';
+import 'change_password_page.dart';
 import 'home_page.dart';
 import 'login_page.dart';
 import 'ride_home_page.dart';
@@ -35,7 +36,7 @@ class _ProfilePageState extends State<ProfilePage> {
   bool isLoading = true;
   bool isLoggingOut = false;
   bool isUploadingPhoto = false;
-  bool isChangingPassword = false;
+
   UserModel? profile;
   String? fallbackEmail;
 
@@ -218,13 +219,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  void _openInterestPreferences() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const EditInterestsPage()),
-    );
-  }
-
   void _openTripPlans() {
     Navigator.push(
       context,
@@ -234,36 +228,14 @@ class _ProfilePageState extends State<ProfilePage> {
 
   // ============================================================
   // CHANGE PASSWORD
-  // Reuses the same forgotPassword() flow the sign-in screen's "Forgot
-  // Password" link already goes through - it emails the person a
-  // secure reset link, so there's no separate "type your new password
-  // here" form (and no need to also ask for the current password) to
-  // build and keep safe.
+  // In-app now (current password -> new password) - see
+  // ChangePasswordPage - instead of emailing a reset link.
   // ============================================================
-  Future<void> _changePassword() async {
-    if (isChangingPassword) return;
-
-    final email = (profile?.email.isNotEmpty ?? false)
-        ? profile!.email
-        : fallbackEmail;
-
-    if (email == null || email.isEmpty) {
-      _showSnack('No email on file for this account', isError: true);
-      return;
-    }
-
-    setState(() => isChangingPassword = true);
-
-    final error = await authController.forgotPassword(email: email);
-
-    if (!mounted) return;
-    setState(() => isChangingPassword = false);
-
-    if (error != null) {
-      _showSnack(error, isError: true);
-    } else {
-      _showSnack('Password reset link sent to $email');
-    }
+  void _openChangePassword() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ChangePasswordPage()),
+    );
   }
 
   void _openAbout() {
@@ -300,7 +272,7 @@ class _ProfilePageState extends State<ProfilePage> {
       MaterialPageRoute(
         builder: (_) => const LoginPage(),
       ),
-      (route) => false,
+          (route) => false,
     );
   }
 
@@ -560,52 +532,36 @@ class _ProfilePageState extends State<ProfilePage> {
                             ),
                           ]),
 
-                          const SizedBox(height: 14),
-
-                          _settingsCard([
-                            _settingsTile(
-                              icon: Icons.tune_rounded,
-                              label: 'Travel Preferences',
-                              value: 'Personalize your recommendations',
-                              onTap: _openInterestPreferences,
-                            ),
-                          ]),
-
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 10),
 
                           _settingsCard([
                             _settingsTile(
                               icon: Icons.event_note_outlined,
                               label: 'My Trip Plans',
                               value: 'Saved multi-stop itineraries',
-                              onTap: _openTripPlans,
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const SavedTripPlansPage(),
+                                  ),
+                                );
+                              },
                             ),
                           ]),
 
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 10),
 
                           _settingsCard([
                             _settingsTile(
                               icon: Icons.lock_outline,
                               label: 'Change Password',
-                              value: isChangingPassword
-                                  ? 'Sending reset link...'
-                                  : 'Send a password reset link by email',
-                              onTap: _changePassword,
-                              trailing: isChangingPassword
-                                  ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: mainGreen,
-                                ),
-                              )
-                                  : null,
+                              value: 'Update your account password',
+                              onTap: _openChangePassword,
                             ),
                           ]),
 
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 10),
 
                           _settingsCard([
                             _settingsTile(

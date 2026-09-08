@@ -176,7 +176,7 @@ class AuthService {
   Future<void> logout() async {
     final bool isGoogleUser = _auth.currentUser?.providerData.any(
           (info) => info.providerId == 'google.com',
-        ) ??
+    ) ??
         false;
 
     await _auth.signOut();
@@ -191,8 +191,8 @@ class AuthService {
 
     try {
       await GoogleSignIn.instance.signOut().timeout(
-            const Duration(seconds: 5),
-          );
+        const Duration(seconds: 5),
+      );
     } catch (_) {
       // Firebase sign-out above already logged the person out of
       // EcoTravel - a slow/broken Google sign-out shouldn't block that.
@@ -223,6 +223,61 @@ class AuthService {
     if (data == null) return null;
 
     return UserModel.fromMap(data);
+  }
+
+  // ============================================================
+  // CHANGE PASSWORD (in-app, while already signed in)
+  // ============================================================
+  Future<String?> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final User? user = _auth.currentUser;
+    final String? email = user?.email;
+
+    if (user == null || email == null || email.isEmpty) {
+      return 'No signed-in account found';
+    }
+
+    final bool usesPasswordSignIn = user.providerData.any(
+          (info) => info.providerId == 'password',
+    );
+
+    if (!usesPasswordSignIn) {
+      return 'This account signed in with Google and has no app password to change';
+    }
+
+    try {
+      final credential = EmailAuthProvider.credential(
+        email: email,
+        password: currentPassword,
+      );
+      await user.reauthenticateWithCredential(credential);
+      await user.updatePassword(newPassword);
+
+      return null;
+    } on FirebaseAuthException catch (e) {
+      print('CHANGE PASSWORD ERROR CODE: ${e.code}');
+      print('CHANGE PASSWORD ERROR MESSAGE: ${e.message}');
+
+      if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+        return 'Current password is incorrect';
+      }
+
+      if (e.code == 'weak-password') {
+        return 'New password is too weak';
+      }
+
+      if (e.code == 'requires-recent-login') {
+        return 'Please log out and log in again, then retry';
+      }
+
+      return e.message ?? 'Unable to change password';
+    } catch (e) {
+      print('CHANGE PASSWORD ERROR: $e');
+
+      return 'Unable to change password. Please try again';
+    }
   }
 
   // ============================================================

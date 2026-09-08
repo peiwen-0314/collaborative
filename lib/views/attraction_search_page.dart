@@ -2,15 +2,22 @@ import 'package:flutter/material.dart';
 
 import '../controllers/personalization_controller.dart';
 import '../models/attraction.dart';
+import '../services/attraction_reviews_service.dart';
 import 'attraction_detail_page.dart';
 
 class AttractionSearchPage extends StatefulWidget {
   final PersonalizationController
   personalizationController;
 
+  /// When true, this page is opened from Home > Recommended for You > View All.
+  /// It first displays only the user's recommendations. Once the user types a
+  /// search keyword, the search runs across ALL active attractions.
+  final bool showRecommendationsInitially;
+
   const AttractionSearchPage({
     super.key,
     required this.personalizationController,
+    this.showRecommendationsInitially = false,
   });
 
   @override
@@ -73,13 +80,7 @@ class _AttractionSearchPageState
       return;
     }
 
-    final latest = widget
-        .personalizationController
-        .allActiveAttractions;
-
-    if (latest.length != _allAttractions.length) {
-      _syncAttractions();
-    }
+    _syncAttractions();
   }
 
   void _syncAttractions() {
@@ -97,12 +98,39 @@ class _AttractionSearchPageState
     final map = <String, String>{};
 
     for (final attraction in _allAttractions) {
-      final id = attraction.categoryId.trim();
-      final name =
+      final ids = attraction.categoryIds
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList();
+
+      final names = attraction.categoryNames
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList();
+
+      // Multiple-category data: categoryIds and categoryNames are stored
+      // in matching positions.
+      final pairCount =
+      ids.length < names.length
+          ? ids.length
+          : names.length;
+
+      for (int i = 0; i < pairCount; i++) {
+        map[ids[i]] = names[i];
+      }
+
+      // Backward-compatible fallback for older attraction records.
+      final primaryId =
+      attraction.categoryId.trim();
+      final primaryName =
       attraction.categoryName.trim();
 
-      if (id.isNotEmpty && name.isNotEmpty) {
-        map[id] = name;
+      if (primaryId.isNotEmpty &&
+          primaryName.isNotEmpty) {
+        map.putIfAbsent(
+          primaryId,
+              () => primaryName,
+        );
       }
     }
 
@@ -175,11 +203,30 @@ class _AttractionSearchPageState
     final keyword =
     _searchText.trim().toLowerCase();
 
-    final result = _allAttractions.where(
+    // If this page was opened from "Recommended for You":
+    // - no keyword: show only recommended attractions;
+    // - keyword entered: search ALL active attractions.
+    final List<AttractionModel> source;
+
+    if (widget.showRecommendationsInitially &&
+        keyword.isEmpty) {
+      source = List<AttractionModel>.from(
+        widget.personalizationController
+            .recommendedAttractions,
+      );
+    } else {
+      source =
+      List<AttractionModel>.from(
+        _allAttractions,
+      );
+    }
+
+    final result = source.where(
           (attraction) {
         final searchableText = [
           attraction.name,
           attraction.categoryName,
+          ...attraction.categoryNames,
           attraction.state,
           attraction.area,
           attraction.description,
@@ -190,12 +237,17 @@ class _AttractionSearchPageState
 
         final matchesSearch =
             keyword.isEmpty ||
-                searchableText.contains(keyword);
+                searchableText
+                    .contains(keyword);
 
         final matchesCategory =
             _selectedCategoryId == null ||
                 attraction.categoryId ==
-                    _selectedCategoryId;
+                    _selectedCategoryId ||
+                attraction.categoryIds
+                    .contains(
+                  _selectedCategoryId,
+                );
 
         final matchesState =
             _selectedState == null ||
@@ -222,13 +274,18 @@ class _AttractionSearchPageState
       },
     ).toList();
 
-    result.sort(
-          (a, b) => a.name
-          .toLowerCase()
-          .compareTo(
-        b.name.toLowerCase(),
-      ),
-    );
+    // Keep recommendation ranking/order when no search has been entered.
+    // Normal search results remain alphabetical.
+    if (!(widget.showRecommendationsInitially &&
+        keyword.isEmpty)) {
+      result.sort(
+            (a, b) => a.name
+            .toLowerCase()
+            .compareTo(
+          b.name.toLowerCase(),
+        ),
+      );
+    }
 
     if (mounted) {
       setState(() {
@@ -335,63 +392,108 @@ class _AttractionSearchPageState
         _allAttractions.isEmpty;
 
     return Scaffold(
-      backgroundColor: pageBackground,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        leading: IconButton(
-          onPressed: () =>
-              Navigator.pop(context),
-          icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            size: 19,
-            color: textColor,
-          ),
-        ),
-        title: const Text(
-          'Explore Attractions',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: textColor,
-          ),
-        ),
-      ),
+      backgroundColor: const Color(0xFFFAFAFA),
       body: SafeArea(
-        child: isLoading
-            ? const Center(
-          child:
-          CircularProgressIndicator(
-            color: mainGreen,
-          ),
-        )
-            : Column(
+        child: Column(
           children: [
-            _topSection(),
-            Expanded(
-              child: _resultSection(),
-            ),
+            _buildHeader(context),
+            if (isLoading)
+              const Expanded(
+                child: Center(
+                  child: CircularProgressIndicator(
+                    color: mainGreen,
+                  ),
+                ),
+              )
+            else ...[
+              _topSection(),
+              Expanded(
+                child: _resultSection(),
+              ),
+            ],
           ],
         ),
       ),
     );
   }
 
+  // ============================================================
+  // HEADER
+  // ============================================================
+
+  Widget _buildHeader(BuildContext context) {
+    final String title =
+    widget.showRecommendationsInitially
+        ? 'Recommended for You'
+        : 'Explore Attractions';
+
+    final String subtitle =
+    widget.showRecommendationsInitially
+        ? 'Personalised places selected for you.'
+        : 'Discover places, experiences and hidden gems.';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        6,
+        12,
+        14,
+        8,
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          IconButton(
+            onPressed: () =>
+                Navigator.maybePop(context),
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              size: 18,
+              color: Colors.black87,
+            ),
+          ),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.black87,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: Color(0xFF8A8A8A),
+                    fontSize: 10,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _topSection() {
     return Container(
-      color: Colors.white,
+      color: const Color(0xFFFAFAFA),
       padding: const EdgeInsets.fromLTRB(
-        18,
-        10,
-        18,
         14,
+        2,
+        14,
+        10,
       ),
       child: Column(
         children: [
           _searchBar(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _filterRow(),
         ],
       ),
@@ -399,55 +501,62 @@ class _AttractionSearchPageState
   }
 
   Widget _searchBar() {
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAF8),
-        borderRadius:
-        BorderRadius.circular(11),
-        border: Border.all(
-          color: borderColor,
-        ),
+    return TextField(
+      controller: _searchController,
+      autofocus:
+      !widget.showRecommendationsInitially,
+      textInputAction: TextInputAction.search,
+      onChanged: _onSearchChanged,
+      onSubmitted: _submitSearch,
+      style: const TextStyle(
+        color: Colors.black87,
+        fontSize: 12,
       ),
-      child: TextField(
-        controller: _searchController,
-        autofocus: true,
-        textInputAction:
-        TextInputAction.search,
-        onChanged: _onSearchChanged,
-        onSubmitted: _submitSearch,
-        style: const TextStyle(
-          fontSize: 12,
-          color: textColor,
+      decoration: InputDecoration(
+        hintText:
+        'Search attractions, locations or categories...',
+        hintStyle: const TextStyle(
+          color: Color(0xFF999999),
+          fontSize: 11,
         ),
-        decoration: InputDecoration(
-          border: InputBorder.none,
-          contentPadding:
-          const EdgeInsets.symmetric(
-            vertical: 14,
+        prefixIcon: const Icon(
+          Icons.search,
+          color: Color(0xFF8B8B8B),
+          size: 20,
+        ),
+        suffixIcon:
+        _searchController.text.isEmpty
+            ? null
+            : IconButton(
+          onPressed: _clearSearch,
+          icon: const Icon(
+            Icons.close,
+            size: 18,
+            color:
+            Color(0xFF8B8B8B),
           ),
-          prefixIcon: const Icon(
-            Icons.search,
-            size: 21,
-            color: Color(0xFF999999),
+        ),
+        filled: true,
+        fillColor:
+        const Color(0xFFF5F5F5),
+        isDense: true,
+        contentPadding:
+        const EdgeInsets.symmetric(
+          vertical: 10,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius:
+          BorderRadius.circular(8),
+          borderSide: const BorderSide(
+            color: borderColor,
           ),
-          hintText:
-          'Search attraction, category or location...',
-          hintStyle: const TextStyle(
-            fontSize: 10.5,
-            color: Color(0xFFAAAAAA),
-          ),
-          suffixIcon:
-          _searchController.text.isEmpty
-              ? null
-              : IconButton(
-            onPressed: _clearSearch,
-            icon: const Icon(
-              Icons.close_rounded,
-              size: 19,
-              color:
-              secondaryText,
-            ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius:
+          BorderRadius.circular(8),
+          borderSide: const BorderSide(
+            color: mainGreen,
+            width: 1.2,
           ),
         ),
       ),
@@ -625,10 +734,10 @@ class _AttractionSearchPageState
             child: Padding(
               padding:
               const EdgeInsets.fromLTRB(
-                18,
-                17,
-                18,
+                14,
                 12,
+                14,
+                10,
               ),
               child: Row(
                 children: [
@@ -636,9 +745,11 @@ class _AttractionSearchPageState
                     child: Text(
                       _searchText
                           .trim()
-                          .isEmpty
-                          ? 'All Attractions'
-                          : 'Search Results',
+                          .isNotEmpty
+                          ? 'Search Results'
+                          : widget.showRecommendationsInitially
+                          ? 'Recommended for You'
+                          : 'All Attractions',
                       style:
                       const TextStyle(
                         fontSize: 15,
@@ -670,9 +781,9 @@ class _AttractionSearchPageState
             SliverPadding(
               padding:
               const EdgeInsets.fromLTRB(
-                18,
+                14,
                 0,
-                18,
+                14,
                 24,
               ),
               sliver:
@@ -706,45 +817,53 @@ class _AttractionSearchPageState
     attraction.coverImageUrl
         .trim()
         .isNotEmpty
-        ? attraction.coverImageUrl
-        .trim()
-        : attraction
-        .imageUrls.isNotEmpty
-        ? attraction
-        .imageUrls.first
+        ? attraction.coverImageUrl.trim()
+        : attraction.imageUrls.isNotEmpty
+        ? attraction.imageUrls.first
         : '';
 
     return Material(
       color: Colors.white,
-      borderRadius:
-      BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(9),
       child: InkWell(
         onTap: () =>
             _openAttraction(attraction),
         borderRadius:
-        BorderRadius.circular(12),
+        BorderRadius.circular(9),
         child: Container(
-          padding:
-          const EdgeInsets.all(10),
+          constraints:
+          const BoxConstraints(
+            minHeight: 116,
+          ),
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
+            color: Colors.white,
             borderRadius:
-            BorderRadius.circular(12),
+            BorderRadius.circular(9),
             border: Border.all(
               color: borderColor,
             ),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x08000000),
+                blurRadius: 5,
+                offset: Offset(0, 2),
+              ),
+            ],
           ),
           child: Row(
             crossAxisAlignment:
             CrossAxisAlignment.start,
             children: [
+              // =================================================
+              // IMAGE
+              // =================================================
               ClipRRect(
                 borderRadius:
-                BorderRadius.circular(
-                  9,
-                ),
+                BorderRadius.circular(8),
                 child: SizedBox(
-                  width: 96,
-                  height: 96,
+                  width: 74,
+                  height: 98,
                   child: imageUrl.isEmpty
                       ? _imageFallback()
                       : Image.network(
@@ -760,121 +879,250 @@ class _AttractionSearchPageState
                   ),
                 ),
               ),
-              const SizedBox(width: 11),
+
+              const SizedBox(width: 10),
+
+              // =================================================
+              // INFORMATION
+              // =================================================
               Expanded(
-                child: SizedBox(
-                  height: 96,
-                  child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
-                    children: [
-                      Text(
-                        attraction.name,
-                        maxLines: 2,
-                        overflow:
-                        TextOverflow
-                            .ellipsis,
-                        style:
-                        const TextStyle(
-                          fontSize: 13,
-                          height: 1.2,
-                          fontWeight:
-                          FontWeight
-                              .w700,
-                          color: textColor,
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 2),
+
+                    Text(
+                      attraction.name,
+                      maxLines: 2,
+                      overflow:
+                      TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontSize: 12.5,
+                        fontWeight:
+                        FontWeight.w800,
+                      ),
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    // Same category tag design as Home.
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children:
+                      _categoryTags(
+                        attraction,
+                      )
+                          .map(
+                        _categoryChip,
+                      )
+                          .toList(),
+                    ),
+
+                    const SizedBox(height: 5),
+
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.location_on,
+                          size: 11,
+                          color: secondaryText,
                         ),
-                      ),
-                      const SizedBox(
-                        height: 5,
-                      ),
-                      Text(
-                        _location(
-                          attraction,
-                        ),
-                        maxLines: 1,
-                        overflow:
-                        TextOverflow
-                            .ellipsis,
-                        style:
-                        const TextStyle(
-                          fontSize: 9,
-                          color:
-                          secondaryText,
-                        ),
-                      ),
-                      const SizedBox(
-                        height: 5,
-                      ),
-                      Text(
-                        attraction
-                            .categoryName
-                            .trim()
-                            .isEmpty
-                            ? 'Attraction'
-                            : attraction
-                            .categoryName,
-                        maxLines: 1,
-                        overflow:
-                        TextOverflow
-                            .ellipsis,
-                        style:
-                        const TextStyle(
-                          fontSize: 8.5,
-                          color: mainGreen,
-                          fontWeight:
-                          FontWeight
-                              .w600,
-                        ),
-                      ),
-                      const Spacer(),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              _openingHours(
-                                attraction,
-                              ),
-                              maxLines: 1,
-                              overflow:
-                              TextOverflow
-                                  .ellipsis,
-                              style:
-                              const TextStyle(
-                                fontSize: 8,
-                                color:
-                                secondaryText,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(
-                            width: 8,
-                          ),
-                          Text(
-                            attraction
-                                .isFreeEntry
-                                ? 'Free'
-                                : _startingFee(
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(
+                            _location(
                               attraction,
                             ),
+                            maxLines: 1,
+                            overflow:
+                            TextOverflow
+                                .ellipsis,
                             style:
                             const TextStyle(
-                              fontSize: 9,
                               color:
-                              mainGreen,
-                              fontWeight:
-                              FontWeight
-                                  .w700,
+                              secondaryText,
+                              fontSize: 8,
                             ),
                           ),
-                        ],
-                      ),
-                    ],
-                  ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    _ratingRow(
+                      attraction.id,
+                    ),
+
+                    const SizedBox(height: 4),
+
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons
+                              .access_time_filled,
+                          size: 10,
+                          color: secondaryText,
+                        ),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(
+                            _openingHours(
+                              attraction,
+                            ),
+                            maxLines: 1,
+                            overflow:
+                            TextOverflow
+                                .ellipsis,
+                            style:
+                            const TextStyle(
+                              color:
+                              secondaryText,
+                              fontSize: 7.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          attraction.isFreeEntry
+                              ? 'Free'
+                              : _startingFee(
+                            attraction,
+                          ),
+                          style:
+                          const TextStyle(
+                            fontSize: 8,
+                            color: mainGreen,
+                            fontWeight:
+                            FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _ratingRow(
+      String attractionId,
+      ) {
+    return AnimatedBuilder(
+      animation:
+      AttractionReviewsService.instance,
+      builder: (context, _) {
+        final service =
+            AttractionReviewsService.instance;
+
+        final double rating =
+        service.averageRatingFor(
+          attractionId,
+        );
+
+        final int reviewCount =
+        service.reviewCountFor(
+          attractionId,
+        );
+
+        return Row(
+          children: [
+            Icon(
+              rating > 0
+                  ? Icons.star_rounded
+                  : Icons
+                  .star_border_rounded,
+              size: 11,
+              color: rating > 0
+                  ? const Color(
+                0xFFFFB300,
+              )
+                  : Colors.black38,
+            ),
+            const SizedBox(width: 3),
+            Text(
+              rating > 0
+                  ? rating.toStringAsFixed(1)
+                  : 'Not rated yet',
+              style: TextStyle(
+                fontSize: 8,
+                color: rating > 0
+                    ? Colors.black87
+                    : secondaryText,
+                fontWeight:
+                FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              reviewCount == 0
+                  ? '(0 reviews)'
+                  : '($reviewCount review${reviewCount == 1 ? '' : 's'})',
+              style: const TextStyle(
+                fontSize: 7.2,
+                color: secondaryText,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  List<String> _categoryTags(
+      AttractionModel attraction,
+      ) {
+    final tags = attraction.categoryNames
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (tags.isNotEmpty) {
+      return tags;
+    }
+
+    final primary =
+    attraction.categoryName.trim();
+
+    if (primary.isNotEmpty) {
+      return [primary];
+    }
+
+    return ['Attraction'];
+  }
+
+  Widget _categoryChip(
+      String category,
+      ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 6,
+        vertical: 2,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: const Color(0xFFC8E6C9),
+          width: 0.7,
+        ),
+      ),
+      child: Text(
+        category,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 6.2,
+          color: mainGreen,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -1233,17 +1481,61 @@ class _AttractionSearchPageState
   String _openingHours(
       AttractionModel attraction,
       ) {
-    final open =
-    attraction.openingTime.trim();
-    final close =
-    attraction.closingTime.trim();
-
-    if (open.isEmpty ||
-        close.isEmpty) {
-      return 'Hours unavailable';
+    if (attraction.isOpen24Hours) {
+      return 'Opening Hours: All Day';
     }
 
-    return '$open - $close';
+    final hasWeeklyHours =
+    attraction.openingHours.values.any(
+          (periods) => periods.any(
+            (period) =>
+        period.trim().isNotEmpty &&
+            period.trim().toLowerCase() !=
+                'closed',
+      ),
+    );
+
+    if (!hasWeeklyHours) {
+      return 'Opening Hours: All Day';
+    }
+
+    const weekdayKeys = [
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+      'sunday',
+    ];
+
+    final todayKey =
+    weekdayKeys[DateTime.now().weekday - 1];
+
+    List<String> periods = const [];
+
+    for (final entry
+    in attraction.openingHours.entries) {
+      if (entry.key.trim().toLowerCase() ==
+          todayKey) {
+        periods = entry.value
+            .map((value) => value.trim())
+            .where(
+              (value) =>
+          value.isNotEmpty &&
+              value.toLowerCase() !=
+                  'closed',
+        )
+            .toList();
+        break;
+      }
+    }
+
+    if (periods.isEmpty) {
+      return 'Opening Hours: Closed Today';
+    }
+
+    return 'Opening Hours: ${periods.join(', ')}';
   }
 
   String _startingFee(

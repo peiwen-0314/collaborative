@@ -57,7 +57,7 @@ class _TripTravelStylePageState
     'Immerse in local culture, history, and authentic experiences.',
 
     'Nature Lover':
-    'Immerse in local culture, history, and authentic experiences.',
+    'Explore parks, forests, beaches, gardens, wildlife, and natural scenery.',
 
     'Relax & Unwind':
     'Take it slow and enjoy relaxing sports, spas, and beautiful beaches.',
@@ -74,11 +74,11 @@ class _TripTravelStylePageState
   // =========================================================
 
   Future<void> _generate() async {
-    if (widget.controller.preferences.travelStyle == null) {
+    if (widget.controller.preferences.travelStyles.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Please select a travel style.',
+            'Please select at least one travel style.',
           ),
         ),
       );
@@ -122,7 +122,7 @@ class _TripTravelStylePageState
   @override
   Widget build(BuildContext context) {
     final selected =
-        widget.controller.preferences.travelStyle;
+        widget.controller.preferences.travelStyles;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -215,7 +215,7 @@ class _TripTravelStylePageState
                     // =================================================
 
                     const Text(
-                      'Choose your travel style',
+                      'Choose your travel styles',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
@@ -225,7 +225,7 @@ class _TripTravelStylePageState
                     const SizedBox(height: 2),
 
                     const Text(
-                      'Select the style that best represents how you like to travel.',
+                      'Select 1 to 3 styles that best represent how you like to travel.',
                       style: TextStyle(
                         fontSize: 9.5,
                         color: Color(0xFF777777),
@@ -271,7 +271,7 @@ class _TripTravelStylePageState
                             .travelStyles[index];
 
                         final isSelected =
-                            selected == style;
+                        selected.contains(style);
 
                         return _travelStyleCard(
                           style: style,
@@ -391,8 +391,24 @@ class _TripTravelStylePageState
   }) {
     return InkWell(
       onTap: () {
-        widget.controller
-            .setTravelStyle(style);
+        final changed =
+        widget.controller.toggleTravelStyle(style);
+
+        if (!changed) {
+          ScaffoldMessenger.of(context)
+              .hideCurrentSnackBar();
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'You can select up to 3 travel styles.',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+
+          return;
+        }
 
         setState(() {});
       },
