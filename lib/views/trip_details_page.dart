@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../controllers/transport_controller.dart';
 import '../core/api_config.dart';
@@ -125,6 +124,13 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
 
   bool _hasPendingEdits = false;
 
+  // True only while the "Done" press is awaiting the actual save
+  // (onSaveEditedLeg's Firestore write, or _saveEditedOption) - distinct
+  // from _loadingLegAlternatives, which is about fetching alternatives
+  // right after pressing "Edit" and is usually already false again by
+  // the time "Done" is pressed.
+  bool _savingEdit = false;
+
   Map<int, List<RideOption>> _legAlternatives = {};
   bool _loadingLegAlternatives = false;
 
@@ -220,8 +226,71 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     }
   }
 
+  /// Persists [newOption] straight back to wherever this trip actually
+  /// lives, without the "Save changes?" confirmation dialog used by
+  /// _edit()/_saveToPlan()/_saveEditedOption() - departure date/time
+  /// changes should just take effect immediately rather than waiting on
+  /// a separate confirm step, unlike picking a different transport
+  /// alternative while editing, which still goes through that
+  /// confirmation.
+  ///
+  /// For a plan leg, saves through onSaveEditedLeg (same as
+  /// _saveToPlan). For an already-bookmarked standalone trip (opened
+  /// from the Saved List), replaces the existing bookmark **by
+  /// [previousOption]'s id, not [newOption]'s** - RideOption.id embeds
+  /// the departure time, so saving under the new option's id would
+  /// leave the old bookmark behind as an orphaned duplicate instead of
+  /// updating it in place. No-op if this trip isn't saved anywhere
+  /// ([wasSaved] false) - an unsaved trip's time change stays local
+  /// until the person explicitly saves it, same as before.
+  Future<void> _persistOptionChange(
+    RideOption newOption, {
+    required RideOption previousOption,
+    required bool wasSaved,
+  }) async {
+    final onSaveEditedLeg = widget.onSaveEditedLeg;
+    if (widget.isPlanLeg && onSaveEditedLeg != null) {
+      try {
+        await onSaveEditedLeg(newOption);
+      } catch (error) {
+        if (!mounted) return;
+        _showSnack('Could not save this change: $error', isError: true);
+      }
+      return;
+    }
+
+    if (!wasSaved) return;
+    try {
+      final oldId = SavedTrip(
+        from: _from,
+        to: widget.to,
+        option: previousOption,
+        savedAt: DateTime.now(),
+      ).id;
+      await _controller.replaceSavedTrip(
+        oldId,
+        SavedTrip(
+          from: _from,
+          to: widget.to,
+          option: newOption,
+          savedAt: DateTime.now(),
+        ),
+      );
+      if (!mounted) return;
+      setState(() => _saved = true);
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack('Could not save this change: $error', isError: true);
+    }
+  }
+
   Future<void> _changeDepartureTime() async {
     final current = _option.departTime;
+    // Snapshot before any of this function's branches touch _option/
+    // _saved, so a later replace-in-place targets the bookmark this
+    // trip was ACTUALLY saved under (see _persistOptionChange).
+    final previousOption = _option;
+    final wasSaved = _saved;
     final date = await showDatePicker(
       context: context,
       initialDate: current,
@@ -365,6 +434,11 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         _loadingLegAlternatives = true;
         _changingTime = false;
       });
+      await _persistOptionChange(
+        updated,
+        previousOption: previousOption,
+        wasSaved: wasSaved,
+      );
       _showSnack(
         'Updated to depart ${formatFriendlyDateTime(updated.departTime)} - confirmed against the real schedule.',
         duration: const Duration(seconds: 4),
@@ -381,6 +455,8 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       failedLegIndex: failedLegIndex,
       failedWantedLabel: failedWantedLabel,
       failedAlternative: failedAlternative,
+      previousOption: previousOption,
+      wasSaved: wasSaved,
     );
   }
 
@@ -388,6 +464,8 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     required RideOption estimatedFallback,
     required DateTime newDepartAt,
     required Duration delta,
+    required RideOption previousOption,
+    required bool wasSaved,
     int? failedLegIndex,
     String? failedWantedLabel,
     RideOption? failedAlternative,
@@ -417,6 +495,11 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           _legAlternatives = {};
           _loadingLegAlternatives = true;
         });
+        await _persistOptionChange(
+          replaced,
+          previousOption: previousOption,
+          wasSaved: wasSaved,
+        );
         _showSnack(
           'Switched to a real alternative - now departing '
               '${formatFriendlyDateTime(replaced.departTime)}, confirmed '
@@ -426,7 +509,11 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         await _loadLegAlternatives();
         break;
       case _ScheduleFallbackChoice.regenerate:
-        await _regenerateForNewTime(newDepartAt);
+        await _regenerateForNewTime(
+          newDepartAt,
+          previousOption: previousOption,
+          wasSaved: wasSaved,
+        );
         break;
       case _ScheduleFallbackChoice.useEstimate:
         setState(() {
@@ -435,6 +522,11 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           _legAlternatives = {};
           _loadingLegAlternatives = true;
         });
+        await _persistOptionChange(
+          estimatedFallback,
+          previousOption: previousOption,
+          wasSaved: wasSaved,
+        );
         _showSnack(
           'Updated to depart '
               '${formatFriendlyDateTime(estimatedFallback.departTime)} - '
@@ -447,7 +539,11 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     }
   }
 
-  Future<void> _regenerateForNewTime(DateTime newDepartAt) async {
+  Future<void> _regenerateForNewTime(
+    DateTime newDepartAt, {
+    required RideOption previousOption,
+    required bool wasSaved,
+  }) async {
     setState(() => _changingTime = true);
     try {
       final result = await _controller.searchRides(
@@ -471,6 +567,11 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         _legAlternatives = {};
         _loadingLegAlternatives = true;
       });
+      await _persistOptionChange(
+        _option,
+        previousOption: previousOption,
+        wasSaved: wasSaved,
+      );
       _showSnack(
         'Found a new real route departing '
             '${formatFriendlyDateTime(_option.departTime)}.',
@@ -567,11 +668,14 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       );
       if (!mounted) return;
       if (shouldSave == true) {
+        setState(() => _savingEdit = true);
         if (widget.isPlanLeg && widget.onSaveEditedLeg != null) {
           await _saveToPlan();
         } else {
           await _saveEditedOption();
         }
+        if (!mounted) return;
+        setState(() => _savingEdit = false);
       } else {
         setState(() {
           _option = _optionBeforeEditing!;
@@ -621,7 +725,18 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
 
   Future<void> _saveEditedOption() async {
     try {
-      await _controller.saveTrip(_asSavedTrip);
+      final originalOption = _optionBeforeEditing;
+      if (_savedBeforeEditing && originalOption != null) {
+        final oldId = SavedTrip(
+          from: _from,
+          to: widget.to,
+          option: originalOption,
+          savedAt: DateTime.now(),
+        ).id;
+        await _controller.replaceSavedTrip(oldId, _asSavedTrip);
+      } else {
+        await _controller.saveTrip(_asSavedTrip);
+      }
       if (!mounted) return;
       setState(() => _saved = true);
       _showSnack('Trip saved', duration: const Duration(seconds: 1));
@@ -788,45 +903,9 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     await _loadLegAlternatives();
   }
 
-  // The dominant real (non-transfer) leg decides which Google Maps
-  // travel mode to open with, so the link matches whatever this app
-  // already planned for the trip instead of a generic/blank pick.
-  // Google Maps' deep link only accepts one of these four modes, so a
-  // mixed walk+bus+walk option still opens as 'transit' overall.
-  static String _googleMapsTravelMode(RideOption option) {
-    final realLegs = option.legs.where((leg) => !leg.isTransfer).toList();
-
-    if (realLegs.isEmpty ||
-        realLegs.every((leg) => leg.mode == TransportMode.walk)) {
-      return 'walking';
-    }
-
-    final primary = realLegs.firstWhere(
-          (leg) => leg.mode != TransportMode.walk,
-      orElse: () => realLegs.first,
-    );
-
-    switch (primary.mode) {
-      case TransportMode.bike:
-        return 'bicycling';
-      case TransportMode.taxi:
-        return 'driving';
-      case TransportMode.walk:
-        return 'walking';
-      case TransportMode.train:
-      case TransportMode.mrt:
-      case TransportMode.bus:
-      case TransportMode.ferry:
-      case TransportMode.other:
-        return 'transit';
-    }
-  }
-
-  // Records the selected trip's CO₂ saving for Gamification, then opens
-  // the person's own Google Maps app/site using the planned travel mode.
-  // Shows this trip's route on the app's own in-app map (no external
-  // app) - see RouteMapPage in navigation_page.dart, which was built
-  // for exactly this: drawing one RideOption's route between two
+  // Shows this trip's route on the app's own in-app map - no external
+  // app is opened. See RouteMapPage in navigation_page.dart, which was
+  // built for exactly this: drawing one RideOption's route between two
   // points.
   Future<void> _startNavigation() async {
     Navigator.of(context).push(
@@ -843,29 +922,6 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       );
     } catch (error) {
       debugPrint('[TripDetailsPage] carbon saving failed: $error');
-    }
-
-    if (!mounted) return;
-
-    final uri = Uri.https('www.google.com', '/maps/dir/', {
-      'api': '1',
-      'origin': _from.coordinateString,
-      'destination': widget.to.coordinateString,
-      'travelmode': _googleMapsTravelMode(_option),
-    });
-
-    try {
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
-      );
-
-      if (!launched && mounted) {
-        _showSnack('Could not open Google Maps.', isError: true);
-      }
-    } catch (error) {
-      if (!mounted) return;
-      _showSnack('Could not open Google Maps: $error', isError: true);
     }
   }
 
@@ -978,6 +1034,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
             editing: _editing,
             editableLegIndices: _editableLegIndices,
             loadingAlternatives: _loadingLegAlternatives,
+            savingEdit: _savingEdit,
             onLegTap: _editLeg,
             allowTimeChange: widget.allowTimeChange,
             isSavedTrip: widget.isSavedTrip,
@@ -1116,6 +1173,7 @@ class _TripContent extends StatelessWidget {
     this.editing = false,
     this.editableLegIndices = const {},
     this.loadingAlternatives = false,
+    this.savingEdit = false,
     this.onLegTap,
     this.allowTimeChange = false,
     this.isSavedTrip = false,
@@ -1138,6 +1196,7 @@ class _TripContent extends StatelessWidget {
   final bool editing;
   final Set<int> editableLegIndices;
   final bool loadingAlternatives;
+  final bool savingEdit;
   final void Function(int legIndex)? onLegTap;
 
   /// See TripDetailsPage.allowTimeChange's doc comment.
@@ -1307,8 +1366,13 @@ class _TripContent extends StatelessWidget {
                     saved: saved,
                     editing: editing,
                     checkingEditability: checkingEditability,
+                    loadingAlternatives: loadingAlternatives,
+                    savingEdit: savingEdit,
                     canEdit: canEdit,
-                    busy: changingTime,
+                    busy:
+                        changingTime ||
+                        (editing && loadingAlternatives) ||
+                        savingEdit,
                     isPlanLeg: isPlanLeg,
                     onSave: onSave,
                     onEdit: onEdit,
@@ -1406,6 +1470,8 @@ class _DetailsActions extends StatelessWidget {
     required this.saved,
     required this.editing,
     required this.checkingEditability,
+    required this.loadingAlternatives,
+    required this.savingEdit,
     required this.canEdit,
     required this.busy,
     required this.isPlanLeg,
@@ -1420,6 +1486,16 @@ class _DetailsActions extends StatelessWidget {
   final bool busy;
 
   final bool checkingEditability;
+
+  // True while pressing "Edit" is still fetching this trip's real leg
+  // alternatives - shows a spinner on the button itself instead of
+  // instantly flipping to the "Done" checkmark with nothing on the
+  // button hinting it's still loading.
+  final bool loadingAlternatives;
+
+  // True while pressing "Done" is actually saving - this is the part
+  // that previously had no loading indicator at all.
+  final bool savingEdit;
 
   final bool canEdit;
 
@@ -1469,14 +1545,17 @@ class _DetailsActions extends StatelessWidget {
                     borderRadius: BorderRadius.circular(7),
                   ),
                 ),
-                icon: editing
-                    ? const Icon(Icons.check, size: 16)
-                    : checkingEditability
+                icon:
+                (editing && loadingAlternatives) ||
+                    checkingEditability ||
+                    savingEdit
                     ? const SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
+                    : editing
+                    ? const Icon(Icons.check, size: 16)
                     : const Icon(Icons.edit_outlined, size: 16),
                 label: Text(
                   editing ? 'Done' : 'Edit',

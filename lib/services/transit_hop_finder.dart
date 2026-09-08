@@ -7,6 +7,23 @@ import '../models/transport_mode.dart';
 import '../models/trip_leg.dart';
 import 'here_transit_service.dart';
 
+/// Recomputes a RideOption's title from its actual legs - same
+/// mode-label-joining rule HereTransitService._parseRoute uses when
+/// building a title from a fresh search (skip walk legs, join the
+/// rest's distinct mode labels with ' + ', fall back to 'Walk' if
+/// every leg was walking). withLegReplaced/withLegsReplaced below use
+/// this instead of carrying the pre-edit option's title forward,
+/// which used to leave a stale title (e.g. still "Taxi") after the
+/// legs underneath it had actually changed mode.
+String titleForLegs(List<TripLeg> legs) {
+  final modeLabels = <String>[];
+  for (final leg in legs) {
+    if (leg.isTransfer || leg.mode == TransportMode.walk) continue;
+    modeLabels.add(leg.mode.label);
+  }
+  return modeLabels.isEmpty ? 'Walk' : modeLabels.toSet().join(' + ');
+}
+
 Future<RideOption?> findTransitHop({
   required HereTransitService? here,
   required LocationPoint from,
@@ -271,7 +288,7 @@ RideOption withLegReplaced(
 
   return RideOption(
     id: id,
-    title: option.title,
+    title: titleForLegs(newLegs),
     legs: newLegs,
     estCostRm: newCost,
     co2Kg: newCo2,
@@ -350,7 +367,7 @@ RideOption withLegsReplaced(
 
   return RideOption(
     id: id,
-    title: option.title,
+    title: titleForLegs(mergedLegs),
     legs: mergedLegs,
     estCostRm: newCost,
     co2Kg: newCo2,

@@ -32,12 +32,28 @@ class TransportService {
 
   static const _cacheTtl = Duration(hours: 12);
 
+  // Two consecutive itinerary stops occasionally geocode to the exact
+  // same fallback point - e.g. an AI-planner attraction whose name/
+  // address didn't resolve on their own falls all the way back to a
+  // shared area-centroid coordinate (see
+  // TransportController._geocodeSavedPlanAttraction). HERE's driving
+  // API still "succeeds" for a same-point request with a rounded-up
+  // ~1 minute duration, which is how a nonsensical "1 min Taxi" leg
+  // between two supposedly different attractions showed up. There is
+  // genuinely nowhere to travel to, so skip the search below it.
+  static const _sameLocationThresholdKm = 0.03;
+
   Future<RouteSearchResult> search({
     required LocationPoint from,
     required LocationPoint to,
     required DateTime departAt,
   }) async {
     await ApiConfig.ensureLoaded();
+
+    if (from.distanceKm(to) < _sameLocationThresholdKm) {
+      return const RouteSearchResult(options: [], isLive: false);
+    }
+
     final cacheKey = _cacheKeyFor(from, to, departAt);
 
     final cached = await _readCache(cacheKey);
@@ -421,7 +437,7 @@ class TransportService {
   }
 
   String _cacheKeyFor(LocationPoint from, LocationPoint to, DateTime departAt) {
-    return 'route_cache_v24_${from.name}__${to.name}__'
+    return 'route_cache_v26_${from.name}__${to.name}__'
         '${departAt.year}-${departAt.month}-${departAt.day}-'
         '${departAt.hour}-${departAt.minute}';
   }

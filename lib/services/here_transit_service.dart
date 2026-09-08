@@ -302,6 +302,69 @@ class HereTransitService implements TransportRepository {
     }
   }
 
+  /// Fetches the raw HERE-encoded route polyline between two points for
+  /// [transportMode] (HERE's own mode strings, e.g. 'bicycle',
+  /// 'pedestrian') - for callers that already compute their own
+  /// distance/duration/cost (like OsmBikeShareService's shared-bike leg)
+  /// but still want TripLeg.encodedPolyline set to a real road-following
+  /// path. buildRideOptionPolylines in navigation_page.dart is what
+  /// actually reads encodedPolyline to draw the in-app navigation map -
+  /// it falls back to a straight line between the leg's two endpoints
+  /// whenever encodedPolyline is null, which is why this needs to be a
+  /// real per-leg polyline string rather than anything on RideOption
+  /// itself. Returns null on any failure so callers can fall back to
+  /// that same straight-line rendering exactly as before.
+  Future<String?> fetchRouteEncodedPolyline({
+    required LocationPoint from,
+    required LocationPoint to,
+    required String transportMode,
+  }) async {
+    if (!ApiConfig.hasHereApiKey) return null;
+
+    try {
+      final uri = Uri.parse(_routingBaseUrl).replace(
+        queryParameters: {
+          'transportMode': transportMode,
+          'origin': from.coordinateString,
+          'destination': to.coordinateString,
+          'return': 'polyline',
+          'apiKey': ApiConfig.hereApiKey,
+        },
+      );
+
+      final response = await _client
+          .get(uri)
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) return null;
+
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final routes = body['routes'] as List?;
+      if (routes == null || routes.isEmpty) return null;
+
+      final sections =
+          (routes.first as Map<String, dynamic>)['sections'] as List?;
+      if (sections == null || sections.isEmpty) return null;
+
+      final polyline =
+          (sections.first as Map<String, dynamic>)['polyline'] as String?;
+      if (polyline == null) return null;
+
+      try {
+        if (!looksLikePlausibleRoute(decodeHereFlexiblePolyline(polyline))) {
+          return null;
+        }
+      } catch (_) {
+        return null;
+      }
+
+      return polyline;
+    } catch (error) {
+      debugPrint('[fetchRouteEncodedPolyline] failed: $error');
+      return null;
+    }
+  }
+
   RideOption _parseRoute(
     Map<String, dynamic> route, {
     required int index,
@@ -316,7 +379,13 @@ class HereTransitService implements TransportRepository {
       throw HereApiException('Route has no sections.');
     }
 
-    final normalizedStart = instantToMalaysiaWallClock(fallbackStart);
+    // fallbackStart is already Malaysia-wall-clock-frame (isUtc: true)
+    // for callers that pre-converted it (e.g. TransportController's
+    // planning/retry flows) - only convert it here if it's still a
+    // real instant, otherwise this would double-apply the +8h shift.
+    final normalizedStart = fallbackStart.isUtc
+        ? fallbackStart
+        : instantToMalaysiaWallClock(fallbackStart);
     var cursor = normalizedStart;
     var totalCostRm = 0.0;
     var totalCo2Kg = 0.0;

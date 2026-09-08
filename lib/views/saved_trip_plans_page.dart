@@ -803,7 +803,42 @@ class _SavedTripPlanDetailPageState
 
   Future<void> _saveEditedLeg(int index, RideOption option) async {
     if (index < 0 || index >= _legs.length) return;
-    _replaceLeg(index, _legs[index].withOption(option));
+    final leg = _legs[index];
+    final attraction = _attractionForLeg(leg);
+    final plan = SavedTripPlan.fromFirestore(widget.planId, widget.data);
+    final dayDate = DateTime.utc(
+      plan.startDate.year,
+      plan.startDate.month,
+      plan.startDate.day + (leg.day - 1),
+    );
+    final openingAt = attraction?.openingDateTime(dayDate);
+    final newVisitStart =
+        (openingAt != null && option.arriveTime.isBefore(openingAt))
+        ? openingAt
+        : option.arriveTime;
+    final visitMinutes =
+        attraction?.recommendedVisitMinutes ??
+        leg.visitEnd.difference(leg.visitStart).inMinutes;
+    final newVisitEnd = newVisitStart.add(Duration(minutes: visitMinutes));
+
+    // Editing this leg's transport can move its arrival time - shift
+    // every later leg on the same day by the same amount so their
+    // planned visit windows (and the routes leading to them) stay
+    // consistent with the edit instead of silently going stale.
+    final updatedLegs = applyEditedLegAndCascade(
+      legs: _legs,
+      editedIndex: index,
+      newOption: option,
+      newVisitStart: newVisitStart,
+      newVisitEnd: newVisitEnd,
+    );
+    setState(() {
+      _legs = updatedLegs;
+      _legsByKey = {
+        for (final updated in updatedLegs)
+          _legKey(updated.day, updated.attractionName): updated,
+      };
+    });
     await _persistLegs();
   }
 

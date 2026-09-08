@@ -246,10 +246,35 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
   Future<void> _saveEditedLeg(int index, RideOption option) async {
     final legs = _legs;
     if (legs == null || index < 0 || index >= legs.length) return;
+    final leg = legs[index];
+    final attraction = _attractionFor(leg);
+    final dayDate = DateTime.utc(
+      widget.plan.startDate.year,
+      widget.plan.startDate.month,
+      widget.plan.startDate.day + (leg.day - 1),
+    );
+    final openingAt = attraction?.openingDateTime(dayDate);
+    final newVisitStart =
+        (openingAt != null && option.arriveTime.isBefore(openingAt))
+        ? openingAt
+        : option.arriveTime;
+    final visitMinutes =
+        attraction?.recommendedVisitMinutes ??
+        leg.visitEnd.difference(leg.visitStart).inMinutes;
+    final newVisitEnd = newVisitStart.add(Duration(minutes: visitMinutes));
+
+    // Editing this leg's transport can move its arrival time - shift
+    // every later leg on the same day by the same amount so their
+    // planned visit windows (and the routes leading to them) stay
+    // consistent with the edit instead of silently going stale.
     setState(() {
-      final newLegs = List<PlannedPlanLeg>.from(legs);
-      newLegs[index] = newLegs[index].withOption(option);
-      _legs = newLegs;
+      _legs = applyEditedLegAndCascade(
+        legs: legs,
+        editedIndex: index,
+        newOption: option,
+        newVisitStart: newVisitStart,
+        newVisitEnd: newVisitEnd,
+      );
     });
     await _save();
   }

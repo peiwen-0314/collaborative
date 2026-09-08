@@ -923,6 +923,18 @@ class TransportController {
 
   Future<void> saveTrip(SavedTrip trip) => _savedTripsStore.save(trip);
 
+  /// Saves [newTrip] in place of the bookmark stored under [oldId] -
+  /// SavedTrip.id embeds the ride option's id, which changes whenever
+  /// its departure time/legs change, so re-saving an edited trip under
+  /// its own (new) id would leave the old bookmark behind as an
+  /// orphaned duplicate instead of updating it. Same remove-then-save
+  /// pattern as swapRainyBikeLeg below. A no-op remove (oldId no
+  /// longer exists) is harmless.
+  Future<void> replaceSavedTrip(String oldId, SavedTrip newTrip) async {
+    await _savedTripsStore.remove(oldId);
+    await _savedTripsStore.save(newTrip);
+  }
+
   Future<void> removeSavedTrip(String tripId) =>
       _savedTripsStore.remove(tripId);
 
@@ -1092,6 +1104,60 @@ class PlannedPlanLeg {
       warning: json['warning'] as String?,
     );
   }
+}
+
+/// After [editedIndex] gets a new option and a new visit window
+/// ([newVisitStart]/[newVisitEnd]) - e.g. its departure time was
+/// changed, or a different transport alternative was picked - every
+/// later leg on the SAME day is shifted by the same delta (its own
+/// option's times included, via [withTimeShifted]) so the rest of
+/// that day's schedule stays consistent with the edit instead of
+/// silently going stale. Legs on a different day are left untouched -
+/// same as [TransportController.planTransportationForPlan], which
+/// starts each day fresh from 9am rather than carrying a previous
+/// day's drift forward.
+List<PlannedPlanLeg> applyEditedLegAndCascade({
+  required List<PlannedPlanLeg> legs,
+  required int editedIndex,
+  required RideOption newOption,
+  required DateTime newVisitStart,
+  required DateTime newVisitEnd,
+}) {
+  final oldLeg = legs[editedIndex];
+  final delta = newVisitEnd.difference(oldLeg.visitEnd);
+
+  final result = List<PlannedPlanLeg>.from(legs);
+  result[editedIndex] = PlannedPlanLeg(
+    day: oldLeg.day,
+    attractionName: oldLeg.attractionName,
+    from: oldLeg.from,
+    to: oldLeg.to,
+    option: newOption,
+    visitStart: newVisitStart,
+    visitEnd: newVisitEnd,
+    warning: oldLeg.warning,
+  );
+
+  if (delta == Duration.zero) return result;
+
+  for (var i = editedIndex + 1; i < result.length; i++) {
+    final leg = result[i];
+    if (leg.day != oldLeg.day) break; // next day starts fresh
+    final shiftedOption = leg.option != null
+        ? withTimeShifted(leg.option!, delta)
+        : null;
+    result[i] = PlannedPlanLeg(
+      day: leg.day,
+      attractionName: leg.attractionName,
+      from: leg.from,
+      to: leg.to,
+      option: shiftedOption,
+      visitStart: leg.visitStart.add(delta),
+      visitEnd: leg.visitEnd.add(delta),
+      warning: leg.warning,
+    );
+  }
+  return result;
 }
 
 class _LegProbeResult {

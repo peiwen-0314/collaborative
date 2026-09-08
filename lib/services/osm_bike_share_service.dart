@@ -225,7 +225,7 @@ class OsmBikeShareService {
         ) /
         1000.0;
 
-    final walkOption = _composeOption(
+    final walkOption = await _composeOption(
       from: from,
       to: to,
       pickupStation: pickupStation,
@@ -236,6 +236,7 @@ class OsmBikeShareService {
       walkFromStationKm: walkFromStationKm,
       firstMileHop: null,
       lastMileHop: null,
+      here: here,
     );
 
     final hopFirst = walkToStationKm > kLongWalkThresholdKm
@@ -286,7 +287,7 @@ class OsmBikeShareService {
 
     if (hopFirst == null && hopLast == null) return [walkOption];
 
-    final transitOption = _composeOption(
+    final transitOption = await _composeOption(
       from: from,
       to: to,
       pickupStation: pickupStation,
@@ -297,11 +298,12 @@ class OsmBikeShareService {
       walkFromStationKm: walkFromStationKm,
       firstMileHop: hopFirst,
       lastMileHop: hopLast,
+      here: here,
     );
     return [walkOption, transitOption];
   }
 
-  RideOption _composeOption({
+  Future<RideOption> _composeOption({
     required LocationPoint from,
     required LocationPoint to,
     required _OsmStation pickupStation,
@@ -312,13 +314,32 @@ class OsmBikeShareService {
     required double walkFromStationKm,
     RideOption? firstMileHop,
     RideOption? lastMileHop,
-  }) {
+    HereTransitService? here,
+  }) async {
     var cursor = departAt;
     final legs = <TripLeg>[];
     var totalCostRm = 0.0;
     var totalCo2Kg = 0.0;
 
-    void addLeg(TransportMode mode, String title, String subtitle, double km) {
+    // Fetched once up front so the map can draw the bike leg along the
+    // real street network instead of a straight line between the two
+    // stations. Doesn't touch distance/duration/cost below, which stay
+    // the same straight-line estimate as before - falls back to null
+    // (straight line, same as before) if no HERE key is configured or
+    // the request fails for any reason.
+    final bikeEncodedPolyline = await here?.fetchRouteEncodedPolyline(
+      from: pickupStation.point,
+      to: dropoffStation.point,
+      transportMode: 'bicycle',
+    );
+
+    void addLeg(
+      TransportMode mode,
+      String title,
+      String subtitle,
+      double km, {
+      String? encodedPolyline,
+    }) {
       final speedKmh = mode == TransportMode.bike ? 15.0 : 4.5;
       final minutes = ((km / speedKmh) * 60).clamp(1, 999).round();
       final start = cursor;
@@ -332,6 +353,7 @@ class OsmBikeShareService {
           end: end,
           isTransfer: false,
           distanceKm: km,
+          encodedPolyline: encodedPolyline,
         ),
       );
       totalCostRm += (kCostPerKmByMode[mode] ?? 0.1) * km;
@@ -358,6 +380,7 @@ class OsmBikeShareService {
       'Shared Bike',
       '(${pickupStation.name} → ${dropoffStation.name})',
       bikeKm,
+      encodedPolyline: bikeEncodedPolyline,
     );
 
     if (lastMileHop != null) {

@@ -128,9 +128,9 @@ class _RideInformation extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GestureDetector(
+        Listener(
           behavior: HitTestBehavior.opaque,
-          onTap: () {
+          onPointerDown: (_) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(option.routeSummary),

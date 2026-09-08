@@ -34,9 +34,9 @@ class LocationRow extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: GestureDetector(
+          child: Listener(
             behavior: HitTestBehavior.opaque,
-            onTap: () {
+            onPointerDown: (_) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(value),

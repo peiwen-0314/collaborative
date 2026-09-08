@@ -284,11 +284,22 @@ class _TimelineCard extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 9, color: AppColors.muted),
+                Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: (_) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(subtitle),
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  },
+                  child: Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 9, color: AppColors.muted),
+                  ),
                 ),
               ],
             ),

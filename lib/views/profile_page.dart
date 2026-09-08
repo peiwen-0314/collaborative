@@ -503,35 +503,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
                           const SizedBox(height: 20),
 
-                          Text(
-                            'ACCOUNT',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey.shade600,
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-
-                          const SizedBox(height: 8),
-
-                          _settingsCard([
-                            _settingsTile(
-                              icon: Icons.person_outline,
-                              label: 'Name',
-                              value: displayName,
-                              onTap: _editName,
-                            ),
-                            _settingsDivider(),
-                            _settingsTile(
-                              icon: Icons.email_outlined,
-                              label: 'Email',
-                              value: displayEmail,
-                            ),
-                          ]),
-
-                          const SizedBox(height: 10),
-
                           _settingsCard([
                             _settingsTile(
                               icon: Icons.event_note_outlined,
