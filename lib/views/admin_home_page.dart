@@ -1,7 +1,9 @@
 import 'package:collaborative_asg/views/attraction_management_page.dart';
 import 'package:collaborative_asg/views/category_management_page.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'admin_login_page.dart';
 import 'admin_moderation_page.dart';
 import 'admin_sidebar.dart';
 
@@ -83,8 +85,19 @@ class AdminHomePage extends StatelessWidget {
             // ===================================================
             // LOGOUT
             // ===================================================
-            onLogoutTap: () {
-              Navigator.pop(context);
+            onLogoutTap: () async {
+              await FirebaseAuth.instance.signOut();
+
+              if (!context.mounted) {
+                return;
+              }
+
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (_) => const AdminLoginPage(),
+                ),
+                    (route) => false,
+              );
             },
           ),
 

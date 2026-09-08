@@ -1,7 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../controllers/category_controller.dart';
 import '../models/category.dart';
+import 'admin_login_page.dart';
 import 'admin_sidebar.dart';
 import 'attraction_management_page.dart';
 
@@ -116,11 +118,18 @@ class _CategoryManagementPageState
 
             onReportTap: () {},
 
-            onLogoutTap: () {
-              Navigator.popUntil(
-                context,
-                    (route) =>
-                route.isFirst,
+            onLogoutTap: () async {
+              await FirebaseAuth.instance.signOut();
+
+              if (!context.mounted) {
+                return;
+              }
+
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (_) => const AdminLoginPage(),
+                ),
+                    (route) => false,
               );
             },
           ),

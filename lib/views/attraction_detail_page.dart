@@ -4,7 +4,6 @@ import '../models/attraction.dart';
 import '../services/attraction_reviews_service.dart';
 import '../services/saved_attractions_service.dart';
 import 'attraction_reviews_page.dart';
-import 'write_attraction_review_page.dart';
 
 
 class AttractionDetailPage extends StatelessWidget {
@@ -558,7 +557,7 @@ class AttractionDetailPage extends StatelessWidget {
                       const SizedBox(height: 12),
 
                       // =================================================
-                      // REVIEWS
+                      // REVIEWS - COMPACT PREVIEW
                       // =================================================
                       Row(
                         children: [
@@ -572,7 +571,6 @@ class AttractionDetailPage extends StatelessWidget {
                               ),
                             ),
                           ),
-
                           TextButton(
                             onPressed: () {
                               Navigator.push(
@@ -587,10 +585,12 @@ class AttractionDetailPage extends StatelessWidget {
                               );
                             },
                             child: const Text(
-                              'View All',
+                              'See all',
                               style: TextStyle(
-                                fontSize: 8,
+                                fontSize: 8.5,
                                 color: mainGreen,
+                                fontWeight:
+                                FontWeight.w600,
                               ),
                             ),
                           ),
@@ -614,125 +614,113 @@ class AttractionDetailPage extends StatelessWidget {
                             attraction.id,
                           );
 
-                          return Container(
-                            width: double.infinity,
-                            padding:
-                            const EdgeInsets.all(
-                              11,
+                          return InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      AttractionReviewsPage(
+                                        attraction:
+                                        attraction,
+                                      ),
+                                ),
+                              );
+                            },
+                            borderRadius:
+                            BorderRadius.circular(
+                              9,
                             ),
-                            decoration: BoxDecoration(
-                              color: lightGreen,
-                              borderRadius:
-                              BorderRadius.circular(
-                                9,
+                            child: Container(
+                              width: double.infinity,
+                              padding:
+                              const EdgeInsets.symmetric(
+                                horizontal: 11,
+                                vertical: 10,
                               ),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons
-                                      .rate_review_outlined,
-                                  size: 20,
-                                  color:
-                                  mainGreen,
+                              decoration: BoxDecoration(
+                                color: const Color(
+                                  0xFFF8FAF8,
                                 ),
-
-                                const SizedBox(
-                                  width: 9,
+                                borderRadius:
+                                BorderRadius.circular(
+                                  9,
                                 ),
-
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                    CrossAxisAlignment
-                                        .start,
-                                    children: [
-                                      Text(
-                                        rating > 0
-                                            ? '${rating.toStringAsFixed(1)} / 5'
-                                            : 'No ratings yet',
-                                        style:
-                                        const TextStyle(
-                                          fontSize: 10,
-                                          fontWeight:
-                                          FontWeight
-                                              .w700,
-                                          color:
-                                          mainGreen,
-                                        ),
-                                      ),
-                                      const SizedBox(
-                                        height: 2,
-                                      ),
-                                      Text(
-                                        count == 0
-                                            ? 'Be the first to share your experience.'
-                                            : 'Based on $count review${count == 1 ? '' : 's'}',
-                                        style:
-                                        const TextStyle(
-                                          fontSize: 7.5,
-                                          color:
-                                          secondaryText,
-                                        ),
-                                      ),
-                                    ],
+                                border: Border.all(
+                                  color: const Color(
+                                    0xFFE3E7E3,
                                   ),
                                 ),
-                              ],
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    rating > 0
+                                        ? Icons
+                                        .star_rounded
+                                        : Icons
+                                        .star_border_rounded,
+                                    size: 18,
+                                    color: const Color(
+                                      0xFFFFB300,
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    width: 5,
+                                  ),
+                                  Text(
+                                    rating > 0
+                                        ? rating
+                                        .toStringAsFixed(
+                                      1,
+                                    )
+                                        : 'Not rated',
+                                    style:
+                                    const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight:
+                                      FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    width: 5,
+                                  ),
+                                  Text(
+                                    '($count)',
+                                    style:
+                                    const TextStyle(
+                                      fontSize: 8,
+                                      color:
+                                      secondaryText,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  const Text(
+                                    'View reviews',
+                                    style: TextStyle(
+                                      fontSize: 8,
+                                      color: mainGreen,
+                                      fontWeight:
+                                      FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(
+                                    width: 2,
+                                  ),
+                                  const Icon(
+                                    Icons
+                                        .chevron_right_rounded,
+                                    size: 17,
+                                    color: mainGreen,
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         },
                       ),
 
                       const SizedBox(height: 10),
-
-                      SizedBox(
-                        width: double.infinity,
-                        height: 38,
-                        child:
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    WriteAttractionReviewPage(
-                                      attraction:
-                                      attraction,
-                                    ),
-                              ),
-                            );
-                          },
-                          icon: const Icon(
-                            Icons
-                                .edit_outlined,
-                            size: 15,
-                          ),
-                          label: const Text(
-                            'Write a Review',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight:
-                              FontWeight.w600,
-                            ),
-                          ),
-                          style:
-                          OutlinedButton.styleFrom(
-                            foregroundColor:
-                            mainGreen,
-                            side: const BorderSide(
-                              color: mainGreen,
-                            ),
-                            shape:
-                            RoundedRectangleBorder(
-                              borderRadius:
-                              BorderRadius.circular(
-                                8,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
 
                       const SizedBox(height: 18),
 

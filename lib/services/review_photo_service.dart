@@ -8,7 +8,7 @@ class ReviewPhotoService {
   ReviewPhotoService._();
 
   static final ReviewPhotoService instance =
-      ReviewPhotoService._();
+  ReviewPhotoService._();
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseStorage _storage = FirebaseStorage.instance;
@@ -31,7 +31,7 @@ class ReviewPhotoService {
 
     final urls = <String>[];
     final batchId =
-        DateTime.now().microsecondsSinceEpoch.toString();
+    DateTime.now().microsecondsSinceEpoch.toString();
 
     for (var index = 0; index < photos.length; index++) {
       final photo = photos[index];
@@ -71,8 +71,8 @@ class ReviewPhotoService {
   }
 
   Future<void> deletePhotos(
-    List<String> urls,
-  ) async {
+      List<String> urls,
+      ) async {
     for (final url in urls) {
       try {
         await _storage.refFromURL(url).delete();

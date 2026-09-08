@@ -1,44 +1,47 @@
-/* eslint-disable max-len */
-
 const {onRequest} = require("firebase-functions/v2/https");
-const {defineSecret} = require("firebase-functions/params");
 const admin = require("firebase-admin");
+const {LanguageServiceClient} = require("@google-cloud/language").v1;
 
 admin.initializeApp();
 
-const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
+const languageClient = new LanguageServiceClient();
 
-// Simple obvious-profanity layer.
-// OpenAI Moderation is the second broader safety layer.
-const BAD_WORD_PATTERNS = [
-  /\bf+u+c+k+\b/i,
-  /\bs+h+i+t+\b/i,
-  /\bb+i+t+c+h+\b/i,
-  /\ba+s+s+h+o+l+e+\b/i,
-  /\bc+u+n+t+\b/i,
-  /\bn+i+g+g+[ae]+r?\b/i,
-];
+// Categories that should block a public travel review.
+// Threshold can be adjusted after testing.
+const BLOCK_THRESHOLDS = {
+  "Toxic": 0.7,
+  "Derogatory": 0.7,
+  "Violent": 0.8,
+  "Sexual": 0.8,
+  "Insult": 0.75,
+  "Profanity": 0.7,
+  "Death, Harm & Tragedy": 0.9,
+};
 
 exports.moderateReview = onRequest(
     {
       region: "us-central1",
-      secrets: [OPENAI_API_KEY],
       timeoutSeconds: 30,
       memory: "256MiB",
       cors: true,
     },
     async (req, res) => {
       try {
+        // =====================================================
+        // 1. POST ONLY
+        // =====================================================
         if (req.method !== "POST") {
           res.status(405).json({
             allowed: false,
             message: "Method not allowed.",
             source: "function",
-            debugCode: "method_not_allowed",
           });
           return;
         }
 
+        // =====================================================
+        // 2. VERIFY FIREBASE LOGIN
+        // =====================================================
         const authorization =
           req.headers.authorization || "";
 
@@ -48,7 +51,6 @@ exports.moderateReview = onRequest(
             message:
               "Please login before submitting a review.",
             source: "authentication",
-            debugCode: "missing_firebase_token",
           });
           return;
         }
@@ -69,24 +71,25 @@ exports.moderateReview = onRequest(
             message:
               "Your session has expired. Please login again.",
             source: "authentication",
-            debugCode: "invalid_firebase_token",
           });
           return;
         }
 
+        // =====================================================
+        // 3. GET REVIEW TEXT
+        // =====================================================
         const text = String(
             req.body && req.body.text ?
               req.body.text :
               "",
         ).trim();
 
-        if (text.length < 5) {
-          res.status(400).json({
-            allowed: false,
-            message:
-              "Please write a little more about your experience.",
+        // Review text is OPTIONAL.
+        if (text.length === 0) {
+          res.status(200).json({
+            allowed: true,
+            message: "No review text to moderate.",
             source: "validation",
-            debugCode: "text_too_short",
           });
           return;
         }
@@ -97,179 +100,97 @@ exports.moderateReview = onRequest(
             message:
               "Review must be 800 characters or fewer.",
             source: "validation",
-            debugCode: "text_too_long",
           });
           return;
         }
 
-        const containsBadWord =
-          BAD_WORD_PATTERNS.some(
-              (pattern) => pattern.test(text),
-          );
+        // =====================================================
+        // 4. GOOGLE CLOUD NATURAL LANGUAGE MODERATION
+        // =====================================================
+        const request = {
+          document: {
+            type: "PLAIN_TEXT",
+            content: text,
+          },
+        };
 
-        if (containsBadWord) {
-          res.status(200).json({
-            allowed: false,
-            message:
-              "Your review contains inappropriate language. Please revise it before submitting.",
-            source: "local-filter",
-            debugCode: "local_bad_word",
-          });
-          return;
-        }
+        const [response] =
+          await languageClient.moderateText(request);
 
-        const moderationResponse = await fetch(
-            "https://api.openai.com/v1/moderations",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization":
-                  `Bearer ${OPENAI_API_KEY.value()}`,
-              },
-              body: JSON.stringify({
-                model: "omni-moderation-latest",
-                input: text,
-              }),
-            },
+        const categories =
+          response.moderationCategories || [];
+
+        console.log(
+            "Google moderation result:",
+            JSON.stringify(categories),
         );
 
-        const rawBody =
-          await moderationResponse.text();
+        // =====================================================
+        // 5. CHECK MODERATION SCORES
+        // =====================================================
+        const blockedCategories = [];
 
-        if (!moderationResponse.ok) {
-          let errorType = "";
+        for (const category of categories) {
+          const name =
+            String(category.name || "");
 
-          try {
-            const parsed = JSON.parse(rawBody);
-            errorType =
-              parsed &&
-              parsed.error &&
-              parsed.error.type ?
-                String(parsed.error.type) :
-                "";
-          } catch (_) {
-            // Keep errorType empty.
+          const confidence =
+            Number(category.confidence || 0);
+
+          const threshold =
+            BLOCK_THRESHOLDS[name];
+
+          if (
+            threshold !== undefined &&
+            confidence >= threshold
+          ) {
+            blockedCategories.push({
+              name: name,
+              confidence: confidence,
+            });
           }
-
-          console.error(
-              "OpenAI moderation request failed.",
-              {
-                status: moderationResponse.status,
-                errorType,
-                body: rawBody,
-              },
-          );
-
-          const status =
-            moderationResponse.status;
-
-          let userMessage =
-            "Unable to check review content right now. Please try again.";
-
-          if (status === 401) {
-            userMessage =
-              "The review checker could not authenticate with the moderation service.";
-          } else if (status === 403) {
-            userMessage =
-              "The review checker does not currently have permission to use moderation.";
-          } else if (status === 429) {
-            userMessage =
-              "The moderation service is temporarily rate-limited. Please try again shortly.";
-          }
-
-          res.status(502).json({
-            allowed: false,
-            message: userMessage,
-            source: "openai-moderation",
-            debugCode: `openai_${status}`,
-          });
-          return;
         }
 
-        let moderation;
-
-        try {
-          moderation =
-            JSON.parse(rawBody);
-        } catch (error) {
-          console.error(
-              "OpenAI moderation returned invalid JSON.",
-              rawBody,
-          );
-
-          res.status(502).json({
-            allowed: false,
-            message:
-              "The moderation service returned an invalid response. Please try again.",
-            source: "openai-moderation",
-            debugCode: "openai_invalid_json",
-          });
-          return;
-        }
-
-        const result =
-          moderation.results &&
-          moderation.results.length > 0 ?
-            moderation.results[0] :
-            null;
-
-        if (!result) {
-          res.status(502).json({
-            allowed: false,
-            message:
-              "The moderation service returned no result. Please try again.",
-            source: "openai-moderation",
-            debugCode: "openai_no_result",
-          });
-          return;
-        }
-
-        if (result.flagged === true) {
-          const flaggedCategories =
-            Object.entries(
-                result.categories || {},
-            )
-                .filter(
-                    ([, flagged]) =>
-                      flagged === true,
-                )
-                .map(([name]) => name);
-
+        // =====================================================
+        // 6. BLOCK INAPPROPRIATE REVIEW
+        // =====================================================
+        if (blockedCategories.length > 0) {
           console.log(
-              "Review rejected by moderation:",
-              flaggedCategories,
+              "Review rejected:",
+              JSON.stringify(blockedCategories),
           );
 
           res.status(200).json({
             allowed: false,
             message:
-              "Your review may contain harmful or inappropriate content. Please revise it and try again.",
-            source: "openai-moderation",
-            debugCode: "openai_flagged",
+              "Your review contains inappropriate content. " +
+              "Please revise it before submitting.",
+            source: "google-moderation",
           });
           return;
         }
 
+        // =====================================================
+        // 7. REVIEW PASSED
+        // =====================================================
         res.status(200).json({
           allowed: true,
           message:
             "Review passed content checks.",
-          source: "openai-moderation",
-          debugCode: "passed",
+          source: "google-moderation",
         });
       } catch (error) {
         console.error(
-            "moderateReview unexpected error:",
+            "Google moderation error:",
             error,
         );
 
         res.status(500).json({
           allowed: false,
           message:
-            "Unable to check review content. Please try again.",
+            "Unable to check review content right now. " +
+            "Please try again.",
           source: "server",
-          debugCode: "function_exception",
         });
       }
     },

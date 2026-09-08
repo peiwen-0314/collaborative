@@ -125,7 +125,6 @@ class AttractionReviewsService extends ChangeNotifier {
               .trim();
 
           if (attractionId.isEmpty ||
-              text.isEmpty ||
               status.toLowerCase() !=
                   'active') {
             continue;

@@ -229,175 +229,99 @@ class _RegisterPageState extends State<RegisterPage> {
               // ==================================================
 
               SizedBox(
-                height: 430,
-                width:
-                double.infinity,
-
+                height: (MediaQuery.sizeOf(context).height * 0.30)
+                    .clamp(235.0, 300.0),
+                width: double.infinity,
                 child: Stack(
-                  fit:
-                  StackFit.expand,
-
+                  fit: StackFit.expand,
                   children: [
                     Image.asset(
                       'assets/images/backgroundImg.png',
-                      fit:
-                      BoxFit.cover,
+                      fit: BoxFit.cover,
+                      alignment: Alignment.center,
                     ),
 
-                    // =============================================
-                    // OVERLAY
-                    // =============================================
-
                     Container(
-                      decoration:
-                      BoxDecoration(
-                        gradient:
-                        LinearGradient(
-                          begin:
-                          Alignment.topCenter,
-
-                          end:
-                          Alignment.bottomCenter,
-
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
                           colors: [
-                            Colors.white
-                                .withOpacity(
-                              0.10,
-                            ),
-
-                            Colors.white
-                                .withOpacity(
-                              0.20,
-                            ),
-
-                            Colors.white
-                                .withOpacity(
-                              0.80,
-                            ),
+                            Colors.white.withOpacity(0.03),
+                            Colors.white.withOpacity(0.08),
+                            Colors.white.withOpacity(0.55),
                           ],
                         ),
                       ),
                     ),
 
-                    // =============================================
-                    // BACK BUTTON
-                    // =============================================
-
+                    // Back button
                     Positioned(
                       left: 4,
                       top: 4,
-
-                      child:
-                      IconButton(
-                        onPressed:
-                        isLoading
+                      child: IconButton(
+                        onPressed: isLoading
                             ? null
                             : () {
-                          Navigator.pop(
-                            context,
-                          );
+                          Navigator.pop(context);
                         },
-
-                        icon:
-                        const Icon(
-                          Icons
-                              .arrow_back_ios_new_rounded,
-
-                          color:
-                          mainGreen,
-
+                        icon: const Icon(
+                          Icons.arrow_back_ios_new_rounded,
+                          color: mainGreen,
                           size: 20,
                         ),
                       ),
                     ),
 
-                    // =============================================
-                    // BRANDING
-                    // =============================================
-
+                    // Same branding size as Login Page
                     Positioned(
-                      left: 30,
-                      bottom: 45,
-
+                      left: 28,
+                      right: 28,
+                      bottom: 35,
                       child: Column(
-                        crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
-
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Row(
+                          const Row(
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.eco,
-                                size: 55,
-                                color:
-                                mainGreen,
+                                size: 38,
+                                color: mainGreen,
                               ),
-
-                              const SizedBox(
-                                width: 8,
-                              ),
-
-                              const Text(
+                              SizedBox(width: 7),
+                              Text(
                                 'EcoTravel',
-
-                                style:
-                                TextStyle(
-                                  fontSize:
-                                  42,
-
-                                  fontWeight:
-                                  FontWeight
-                                      .bold,
-
-                                  color:
-                                  mainGreen,
+                                style: TextStyle(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.bold,
+                                  color: mainGreen,
                                 ),
                               ),
                             ],
                           ),
 
-                          const SizedBox(
-                            height: 6,
-                          ),
+                          const SizedBox(height: 3),
 
                           const Text(
                             'Travel Smart, Travel Green',
-
-                            style:
-                            TextStyle(
-                              fontSize:
-                              18,
-
-                              fontWeight:
-                              FontWeight
-                                  .w500,
-
-                              color:
-                              mainGreen,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: mainGreen,
                             ),
                           ),
 
-                          const SizedBox(
-                            height: 24,
-                          ),
+                          const SizedBox(height: 12),
 
                           const Text(
                             'Plan sustainable trips,\n'
                                 'explore responsibly,\n'
                                 'and protect our planet.',
-
-                            style:
-                            TextStyle(
-                              fontSize:
-                              17,
-
-                              height:
-                              1.5,
-
-                              color:
-                              Colors
-                                  .black87,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              height: 1.30,
+                              color: Colors.black87,
                             ),
                           ),
                         ],

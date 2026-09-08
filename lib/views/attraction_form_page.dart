@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -10,8 +11,10 @@ import '../models/category.dart';
 import '../models/google_place.dart';
 import '../services/google_places_service.dart';
 import 'admin_heritage_form_page.dart';
+import 'admin_login_page.dart';
 import 'admin_sidebar.dart';
 import 'attraction_map_picker_page.dart';
+import 'category_management_page.dart';
 
 class AttractionFormPage extends StatefulWidget {
   final AttractionModel? attraction;
@@ -72,7 +75,6 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
 
   String _googlePlaceId = '';
   List<GooglePlace> _googleResults = [];
-  List<GooglePlacePhoto> _googlePhotos = [];
 
   bool _isSearchingGoogle = false;
   bool _isLoadingGoogleDetails = false;
@@ -296,6 +298,36 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     );
   }
 
+  void _formatMoneyController(
+      TextEditingController controller,
+      ) {
+    final raw = controller.text.trim();
+
+    if (raw.isEmpty) {
+      return;
+    }
+
+    final value = double.tryParse(raw);
+
+    if (value == null) {
+      return;
+    }
+
+    controller.text = value.toStringAsFixed(2);
+    controller.selection = TextSelection.collapsed(
+      offset: controller.text.length,
+    );
+  }
+
+  void _formatAllFees() {
+    _formatMoneyController(_malaysianAdultController);
+    _formatMoneyController(_malaysianChildController);
+    _formatMoneyController(_malaysianSeniorController);
+    _formatMoneyController(_nonMalaysianAdultController);
+    _formatMoneyController(_nonMalaysianChildController);
+    _formatMoneyController(_nonMalaysianSeniorController);
+  }
+
   @override
   void dispose() {
     _controller.removeListener(_refreshPage);
@@ -456,7 +488,6 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
           periods.join(', ');
     }
 
-    _googlePhotos = place.photos;
     _googleSearchController.text = place.name;
 
     final anyOpeningHour = place.openingHours.values
@@ -574,17 +605,33 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
             onAttractionTap: () {
               Navigator.pop(context);
             },
-            onCategoryTap: () {},
+            onCategoryTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                  const CategoryManagementPage(),
+                ),
+              );
+            },
             onCulturalHeritageTap: () {
               // Cultural & Heritage information is managed inside
               // Attraction Management in the unified admin flow.
             },
             onStampTap: () {},
             onReportTap: () {},
-            onLogoutTap: () {
-              Navigator.popUntil(
-                context,
-                    (route) => route.isFirst,
+            onLogoutTap: () async {
+              await FirebaseAuth.instance.signOut();
+
+              if (!context.mounted) {
+                return;
+              }
+
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (_) => const AdminLoginPage(),
+                ),
+                    (route) => false,
               );
             },
           ),
@@ -675,8 +722,8 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
                 !_isEdit && _isCulturalHeritage
                     ? 'Step 1 of 2: Complete the attraction details, then click Next.'
                     : _isEdit
-                    ? 'Update Google Place, EcoTravel and attraction information.'
-                    : 'Import real place data from Google, then complete EcoTravel information.',
+                    ? 'Update attraction and EcoTravel information.'
+                    : 'Use Google Place to auto-fill details, upload one attraction image, then save.',
                 style: const TextStyle(
                   fontSize: 13,
                   color: secondaryText,
@@ -725,7 +772,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     return _sectionCard(
       title: 'Google Place',
       subtitle:
-      'Optional: search Google to auto-fill place information. You may also enter the attraction manually.',
+      'Optional: search Google to auto-fill place information. Images are selected separately in EcoTravel Images.',
       icon: Icons.travel_explore_outlined,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -881,88 +928,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
               ),
             ),
           ],
-          if (_googlePhotos.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            const Text(
-              'Google Photos Preview',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 10),
-            SizedBox(
-              height: 145,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount:
-                _googlePhotos.length > 5 ? 5 : _googlePhotos.length,
-                separatorBuilder: (_, __) =>
-                const SizedBox(width: 10),
-                itemBuilder: (context, index) {
-                  return _googlePhotoCard(
-                    _googlePhotos[index],
-                  );
-                },
-              ),
-            ),
-          ],
         ],
-      ),
-    );
-  }
-
-  Widget _googlePhotoCard(GooglePlacePhoto photo) {
-    return SizedBox(
-      width: 210,
-      child: FutureBuilder<String>(
-        future: _placesService.getPhotoUri(
-          photo,
-          maxWidthPx: 700,
-        ),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return Container(
-              width: 210,
-              height: 125,
-              color: const Color(0xFFF2F4F7),
-              alignment: Alignment.center,
-              child: const CircularProgressIndicator(
-                strokeWidth: 2,
-                color: mainGreen,
-              ),
-            );
-          }
-
-          final url = snapshot.data?.trim() ?? '';
-
-          if (snapshot.hasError || url.isEmpty) {
-            return Container(
-              width: 210,
-              height: 125,
-              color: const Color(0xFFF2F4F7),
-              alignment: Alignment.center,
-              child: const Icon(Icons.broken_image_outlined),
-            );
-          }
-
-          return ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              url,
-              width: 210,
-              height: 125,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
-                width: 210,
-                height: 125,
-                color: const Color(0xFFF2F4F7),
-                alignment: Alignment.center,
-                child: const Icon(Icons.broken_image_outlined),
-              ),
-            ),
-          );
-        },
       ),
     );
   }
@@ -1054,7 +1020,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     return _sectionCard(
       title: 'Visit Information',
       subtitle:
-      'Weekly opening hours can be imported from Google and edited by Admin.',
+      'Weekly opening hours can be auto-filled from Google and edited by Admin.',
       icon: Icons.schedule_outlined,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1421,13 +1387,30 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     );
   }
 
+  Future<void> _pickSingleAttractionImage() async {
+    await _controller.pickImages();
+
+    if (!mounted) {
+      return;
+    }
+
+    // A newly selected image replaces old images in this form.
+    // Existing Storage files are only deleted after Save succeeds.
+    if (_controller.selectedImages.isNotEmpty) {
+      setState(() {
+        _existingImageUrls.clear();
+        _existingCoverUrl = null;
+      });
+    }
+  }
+
   Widget _imageSection() {
     final newImages = _controller.selectedImages;
 
     return _sectionCard(
       title: 'EcoTravel Images',
       subtitle:
-      'Images uploaded here are stored in Firebase Storage. Google photos are preview only.',
+      'Choose one attraction image. It will be uploaded to Firebase Storage when you save.',
       icon: Icons.photo_library_outlined,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1453,7 +1436,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
           InkWell(
             onTap: _controller.isProcessing
                 ? null
-                : _controller.pickImages,
+                : _pickSingleAttractionImage,
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.all(26),
@@ -1473,7 +1456,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    'Click to upload attraction images',
+                    'Click to choose an attraction image',
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                     ),
@@ -1738,6 +1721,8 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
   Future<void> _saveAttraction({
     bool openHeritageAfterSave = false,
   }) async {
+    _formatAllFees();
+
     final name = _nameController.text.trim();
     final area = _areaController.text.trim();
     final description = _descriptionController.text.trim();
@@ -2265,15 +2250,27 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
         TextField(
           controller: controller,
           enabled:
-          !_isFreeEntry && !_controller.isProcessing,
+          !_isFreeEntry &&
+              !_controller.isProcessing,
           keyboardType:
-          const TextInputType.numberWithOptions(decimal: true),
+          const TextInputType.numberWithOptions(
+            decimal: true,
+          ),
           inputFormatters: [
             FilteringTextInputFormatter.allow(
               RegExp(r'^\d{0,4}(\.\d{0,2})?'),
             ),
           ],
-          decoration: _inputDecoration(hint: '0.00').copyWith(
+          onEditingComplete: () {
+            _formatMoneyController(controller);
+            FocusScope.of(context).unfocus();
+          },
+          onTapOutside: (_) {
+            _formatMoneyController(controller);
+            FocusScope.of(context).unfocus();
+          },
+          decoration:
+          _inputDecoration(hint: '0.00').copyWith(
             prefixText: 'RM ',
           ),
         ),

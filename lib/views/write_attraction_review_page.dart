@@ -14,9 +14,11 @@ class WriteAttractionReviewPage
   const WriteAttractionReviewPage({
     super.key,
     required this.attraction,
+    this.initialRating = 0,
   });
 
   final AttractionModel attraction;
+  final int initialRating;
 
   @override
   State<WriteAttractionReviewPage>
@@ -53,6 +55,12 @@ class _WriteAttractionReviewPageState
 
   int _rating = 0;
   bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _rating = widget.initialRating.clamp(0, 5);
+  }
 
   @override
   void dispose() {
@@ -185,7 +193,7 @@ class _WriteAttractionReviewPageState
               ),
 
               const Text(
-                'Your Review',
+                'Your Review (Optional)',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight:
@@ -199,7 +207,7 @@ class _WriteAttractionReviewPageState
               ),
 
               const Text(
-                'Share useful details about your visit.',
+                'Share useful details about your visit, or leave this blank.',
                 style: TextStyle(
                   fontSize: 9,
                   color:
@@ -858,13 +866,6 @@ class _WriteAttractionReviewPageState
       return;
     }
 
-    if (text.length < 5) {
-      _showMessage(
-        'Please write a little more about your experience.',
-      );
-      return;
-    }
-
     final user =
         FirebaseAuth
             .instance.currentUser;
@@ -897,14 +898,8 @@ class _WriteAttractionReviewPageState
       }
 
       if (!moderation.allowed) {
-        final debug =
-            moderation.debugCode;
-
         _showMessage(
-          debug == null ||
-              debug.isEmpty
-              ? moderation.message
-              : '${moderation.message} [$debug]',
+          moderation.message,
           isError: true,
         );
         return;

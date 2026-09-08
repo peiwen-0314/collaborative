@@ -1,11 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../controllers/attraction_controller.dart';
 import '../models/attraction.dart';
 import 'add_attraction_page.dart';
+import 'admin_login_page.dart';
 import 'admin_sidebar.dart';
-import 'bulk_attraction_import_page.dart';
 import 'category_management_page.dart';
 import 'edit_attraction_page.dart';
 
@@ -105,10 +106,18 @@ class _AttractionManagementPageState
 
             onReportTap: () {},
 
-            onLogoutTap: () {
-              Navigator.popUntil(
-                context,
-                    (route) => route.isFirst,
+            onLogoutTap: () async {
+              await FirebaseAuth.instance.signOut();
+
+              if (!context.mounted) {
+                return;
+              }
+
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (_) => const AdminLoginPage(),
+                ),
+                    (route) => false,
               );
             },
           ),
@@ -176,22 +185,26 @@ class _AttractionManagementPageState
   Widget _pageHeader() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final bool compact = constraints.maxWidth < 760;
+        final bool compact =
+            constraints.maxWidth < 760;
 
-        final Widget title = const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        final Widget title =
+        const Column(
+          crossAxisAlignment:
+          CrossAxisAlignment.start,
           children: [
             Text(
               'Attraction Management',
               style: TextStyle(
                 fontSize: 28,
-                fontWeight: FontWeight.bold,
+                fontWeight:
+                FontWeight.bold,
                 color: textColor,
               ),
             ),
             SizedBox(height: 5),
             Text(
-              'View, add, import, edit or remove attraction details.',
+              'View, add, edit or remove attraction details.',
               style: TextStyle(
                 fontSize: 13,
                 color: secondaryText,
@@ -200,31 +213,12 @@ class _AttractionManagementPageState
           ],
         );
 
-        final Widget importButton = OutlinedButton(
+        final Widget addButton =
+        ElevatedButton.icon(
           onPressed:
-          _controller.isProcessing ? null : _openBulkImport,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: mainGreen,
-            side: const BorderSide(color: mainGreen),
-            padding: const EdgeInsets.symmetric(
-              horizontal: 22,
-              vertical: 16,
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(7),
-            ),
-          ),
-          child: const Text(
-            'Import Attractions',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        );
-
-        final Widget addButton = ElevatedButton.icon(
-          onPressed:
-          _controller.isProcessing ? null : _openAddAttraction,
+          _controller.isProcessing
+              ? null
+              : _openAddAttraction,
           icon: const Icon(
             Icons.add,
             size: 20,
@@ -232,37 +226,41 @@ class _AttractionManagementPageState
           label: const Text(
             'Add New Attraction',
             style: TextStyle(
-              fontWeight: FontWeight.w600,
+              fontWeight:
+              FontWeight.w600,
             ),
           ),
-          style: ElevatedButton.styleFrom(
+          style:
+          ElevatedButton.styleFrom(
             backgroundColor: mainGreen,
-            foregroundColor: Colors.white,
+            foregroundColor:
+            Colors.white,
             elevation: 0,
-            padding: const EdgeInsets.symmetric(
+            padding:
+            const EdgeInsets.symmetric(
               horizontal: 22,
               vertical: 16,
             ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(7),
+            shape:
+            RoundedRectangleBorder(
+              borderRadius:
+              BorderRadius.circular(
+                7,
+              ),
             ),
           ),
         );
 
         if (compact) {
           return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment:
+            CrossAxisAlignment.start,
             children: [
               title,
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  importButton,
-                  addButton,
-                ],
+              const SizedBox(
+                height: 14,
               ),
+              addButton,
             ],
           );
         }
@@ -270,8 +268,6 @@ class _AttractionManagementPageState
         return Row(
           children: [
             Expanded(child: title),
-            importButton,
-            const SizedBox(width: 10),
             addButton,
           ],
         );
@@ -1948,26 +1944,6 @@ class _AttractionManagementPageState
         isError ? Colors.red.shade700 : mainGreen,
       ),
     );
-  }
-
-  // ============================================================
-  // BULK IMPORT
-  // ============================================================
-
-  Future<void> _openBulkImport() async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) =>
-        const BulkAttractionImportPage(),
-      ),
-    );
-
-    if (!mounted) {
-      return;
-    }
-
-    await _controller.loadData();
   }
 
   // ============================================================

@@ -282,22 +282,25 @@ class AttractionController extends ChangeNotifier {
         return;
       }
 
-      for (final PlatformFile file in files) {
-        final Uint8List bytes =
-        await file.readAsBytes();
+      // Only keep ONE image.
+      final PlatformFile file = files.first;
+      final Uint8List bytes =
+      await file.readAsBytes();
 
-        _selectedImages.add(
+      _selectedImages
+        ..clear()
+        ..add(
           SelectedAttractionImage(
             name: file.name,
             bytes: bytes,
           ),
         );
-      }
 
+      _coverImageIndex = 0;
       notifyListeners();
     } catch (e) {
       debugPrint(
-        'Pick images error: $e',
+        'Pick image error: $e',
       );
     }
   }

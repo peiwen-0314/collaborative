@@ -47,11 +47,14 @@ class ReviewModerationService {
       ) async {
     final text = reviewText.trim();
 
+    // Rating is required, but review text is optional.
+    // If the user leaves the review text empty, there is nothing to moderate.
     if (text.isEmpty) {
       return const ReviewModerationResult(
-        allowed: false,
-        message: 'Please enter your review.',
+        allowed: true,
+        message: 'No review text to moderate.',
         source: 'validation',
+        debugCode: 'no_text',
       );
     }
 

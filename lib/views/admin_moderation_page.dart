@@ -1,7 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../services/admin_moderation_service.dart';
 import 'admin_home_page.dart';
+import 'admin_login_page.dart';
 import 'admin_sidebar.dart';
 import 'attraction_management_page.dart';
 import 'category_management_page.dart';
@@ -88,10 +90,20 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
             onModerationTap: () {},
             onStampTap: () {},
             onReportTap: () {},
-            onLogoutTap: () => Navigator.popUntil(
-              context,
-              (route) => route.isFirst,
-            ),
+            onLogoutTap: () async {
+              await FirebaseAuth.instance.signOut();
+
+              if (!context.mounted) {
+                return;
+              }
+
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (_) => const AdminLoginPage(),
+                ),
+                    (route) => false,
+              );
+            },
           ),
           Expanded(
             child: Stack(
