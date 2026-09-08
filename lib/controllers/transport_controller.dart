@@ -951,7 +951,10 @@ class TransportController {
       final point = leg.startPoint ?? leg.endPoint;
       if (point == null) continue;
       try {
-        final weather = await _weatherService.checkConditions(point);
+        final weather = await _weatherService.checkConditions(
+          point,
+          at: leg.start,
+        );
         if (weather.known && weather.isRaining) {
           alerts.add(RainyBikeAlert(trip: trip, legIndex: legIndex));
         }

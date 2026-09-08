@@ -44,15 +44,67 @@ class WeatherService {
 
   static const _extremeHeatThreshold = 36.0;
 
-  Future<WeatherCheck> checkConditions(LocationPoint point) async {
+  // Forecast range Open-Meteo actually serves per request - a planned
+  // time further out than this has no hourly data to match against.
+  static const _forecastDays = 16;
+
+  // If the closest hourly forecast slot is further than this from `at`,
+  // treat it as "no forecast for that time" rather than silently using a
+  // far-off hour's weather.
+  static const _maxForecastGap = Duration(hours: 2);
+
+  /// Index into an hourly `time` array closest to [at]. [at] and the
+  /// parsed timestamps are compared as plain wall-clock values (see the
+  /// class doc comment above checkConditions) - no timezone conversion.
+  /// Returns null if [times] is empty or nothing is within
+  /// [_maxForecastGap] of [at].
+  int? _nearestHourlyIndex(List<dynamic>? times, DateTime at) {
+    if (times == null || times.isEmpty) return null;
+    int? bestIndex;
+    Duration? bestGap;
+    for (var i = 0; i < times.length; i++) {
+      final raw = times[i] as String?;
+      if (raw == null) continue;
+      final parsed = DateTime.parse(raw);
+      final wallClock = DateTime.utc(
+        parsed.year,
+        parsed.month,
+        parsed.day,
+        parsed.hour,
+        parsed.minute,
+      );
+      final gap = wallClock.difference(at).abs();
+      if (bestGap == null || gap < bestGap) {
+        bestGap = gap;
+        bestIndex = i;
+      }
+    }
+    if (bestIndex == null || bestGap! > _maxForecastGap) return null;
+    return bestIndex;
+  }
+
+  /// Checks weather at [point]. By default checks real-time "right now"
+  /// conditions (`current`). Pass [at] - a planned/departure time in this
+  /// app's usual Malaysia-wall-clock frame (e.g. TripLeg.start,
+  /// RideOption.departTime) - to instead check the forecast for that
+  /// specific time (`hourly`, nearest matching hour). Returns
+  /// WeatherCheck.unknown() if [at] falls outside Open-Meteo's forecast
+  /// range.
+  Future<WeatherCheck> checkConditions(LocationPoint point, {DateTime? at}) async {
     bool? isRaining;
     bool? isExtremeHeat;
     try {
-      final uri = Uri.parse(
-        '$_forecastUrl?latitude=${point.lat}&longitude=${point.lng}'
-        '&current=precipitation,weather_code,apparent_temperature'
-        '&timezone=auto',
-      );
+      final uri = at == null
+          ? Uri.parse(
+              '$_forecastUrl?latitude=${point.lat}&longitude=${point.lng}'
+              '&current=precipitation,weather_code,apparent_temperature'
+              '&timezone=auto',
+            )
+          : Uri.parse(
+              '$_forecastUrl?latitude=${point.lat}&longitude=${point.lng}'
+              '&hourly=precipitation,weather_code,apparent_temperature'
+              '&timezone=auto&forecast_days=$_forecastDays',
+            );
       final response = await http.get(uri).timeout(const Duration(seconds: 8));
       if (response.statusCode != 200) {
         debugPrint(
@@ -61,14 +113,34 @@ class WeatherService {
         );
       } else {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
-        final current = json['current'] as Map<String, dynamic>?;
-        if (current != null) {
-          final precipitationMm =
-              (current['precipitation'] as num?)?.toDouble() ?? 0.0;
-          final weatherCode = (current['weather_code'] as num?)?.toInt() ?? 0;
+        double? precipitationMm;
+        int? weatherCode;
+        double? apparentC;
+        if (at == null) {
+          final current = json['current'] as Map<String, dynamic>?;
+          if (current != null) {
+            precipitationMm = (current['precipitation'] as num?)?.toDouble() ?? 0.0;
+            weatherCode = (current['weather_code'] as num?)?.toInt() ?? 0;
+            apparentC = (current['apparent_temperature'] as num?)?.toDouble();
+          }
+        } else {
+          final hourly = json['hourly'] as Map<String, dynamic>?;
+          final index = _nearestHourlyIndex(hourly?['time'] as List?, at);
+          if (index == null) {
+            debugPrint(
+              '[WeatherService] ${point.name}: no forecast hour near $at',
+            );
+          } else {
+            final precipList = hourly?['precipitation'] as List?;
+            final codeList = hourly?['weather_code'] as List?;
+            final heatList = hourly?['apparent_temperature'] as List?;
+            precipitationMm = (precipList?[index] as num?)?.toDouble() ?? 0.0;
+            weatherCode = (codeList?[index] as num?)?.toInt() ?? 0;
+            apparentC = (heatList?[index] as num?)?.toDouble();
+          }
+        }
+        if (precipitationMm != null && weatherCode != null) {
           isRaining = precipitationMm > 0.1 || _isRainCode(weatherCode);
-          final apparentC = (current['apparent_temperature'] as num?)
-              ?.toDouble();
           if (apparentC != null) {
             isExtremeHeat = apparentC >= _extremeHeatThreshold;
           }
@@ -85,10 +157,15 @@ class WeatherService {
 
     bool? isHazy;
     try {
-      final uri = Uri.parse(
-        '$_airQualityUrl?latitude=${point.lat}&longitude=${point.lng}'
-        '&current=pm10&timezone=auto',
-      );
+      final uri = at == null
+          ? Uri.parse(
+              '$_airQualityUrl?latitude=${point.lat}&longitude=${point.lng}'
+              '&current=pm10&timezone=auto',
+            )
+          : Uri.parse(
+              '$_airQualityUrl?latitude=${point.lat}&longitude=${point.lng}'
+              '&hourly=pm10&timezone=auto&forecast_days=$_forecastDays',
+            );
       final response = await http.get(uri).timeout(const Duration(seconds: 8));
       if (response.statusCode != 200) {
         debugPrint(
@@ -97,8 +174,18 @@ class WeatherService {
         );
       } else {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
-        final current = json['current'] as Map<String, dynamic>?;
-        final pm10 = (current?['pm10'] as num?)?.toDouble();
+        double? pm10;
+        if (at == null) {
+          final current = json['current'] as Map<String, dynamic>?;
+          pm10 = (current?['pm10'] as num?)?.toDouble();
+        } else {
+          final hourly = json['hourly'] as Map<String, dynamic>?;
+          final index = _nearestHourlyIndex(hourly?['time'] as List?, at);
+          if (index != null) {
+            final pm10List = hourly?['pm10'] as List?;
+            pm10 = (pm10List?[index] as num?)?.toDouble();
+          }
+        }
         if (pm10 != null) {
           isHazy = pm10 >= _hazyPm10Threshold;
           debugPrint(
