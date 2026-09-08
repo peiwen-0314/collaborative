@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../controllers/transport_controller.dart';
 import '../core/api_config.dart';
@@ -17,7 +18,6 @@ import '../services/destination_photo_service.dart';
 import '../services/transit_hop_finder.dart';
 import '../widgets/location_row.dart';
 import '../widgets/trip_widgets.dart';
-import 'navigation_page.dart';
 
 List<Widget> _timelineItems(
   List<TripLeg> legs, {
@@ -579,9 +579,11 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       _hasPendingEdits = false;
     }
     if (!mounted) return;
+    // Keep _legAlternatives around (don't reset to {}) - clearing it here
+    // made _editableLegIndices empty again right after finishing an edit,
+    // which disabled the Edit button until the page was fully reopened.
     setState(() {
       _editing = false;
-      _legAlternatives = {};
       _loadingLegAlternatives = false;
     });
   }
@@ -784,17 +786,60 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     await _loadLegAlternatives();
   }
 
-  void _startNavigation() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => RouteMapPage(
-          from: _from,
-          to: widget.to,
-          option: _option,
-          showDefaultNotice: routeMapShowsDefaultNoticeFor(_option),
-        ),
-      ),
+  // The dominant real (non-transfer) leg decides which Google Maps
+  // travel mode to open with, so the link matches whatever this app
+  // already planned for the trip instead of a generic/blank pick.
+  // Google Maps' deep link only accepts one of these four modes, so a
+  // mixed walk+bus+walk option still opens as 'transit' overall.
+  static String _googleMapsTravelMode(RideOption option) {
+    final realLegs = option.legs.where((leg) => !leg.isTransfer).toList();
+    if (realLegs.isEmpty ||
+        realLegs.every((leg) => leg.mode == TransportMode.walk)) {
+      return 'walking';
+    }
+    final primary = realLegs.firstWhere(
+      (leg) => leg.mode != TransportMode.walk,
+      orElse: () => realLegs.first,
     );
+    switch (primary.mode) {
+      case TransportMode.bike:
+        return 'bicycling';
+      case TransportMode.taxi:
+        return 'driving';
+      case TransportMode.walk:
+        return 'walking';
+      case TransportMode.train:
+      case TransportMode.mrt:
+      case TransportMode.bus:
+      case TransportMode.ferry:
+      case TransportMode.other:
+        return 'transit';
+    }
+  }
+
+  // Opens the person's own Google Maps app/site with the origin,
+  // destination, and the travel mode this app already planned for the
+  // trip (see _googleMapsTravelMode) - so Google Maps opens straight
+  // into the same kind of route instead of a generic/default one.
+  Future<void> _startNavigation() async {
+    final uri = Uri.https('www.google.com', '/maps/dir/', {
+      'api': '1',
+      'origin': _from.coordinateString,
+      'destination': widget.to.coordinateString,
+      'travelmode': _googleMapsTravelMode(_option),
+    });
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        _showSnack('Could not open Google Maps.', isError: true);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack('Could not open Google Maps: $error', isError: true);
+    }
   }
 
   Future<void> _changeFrom() async {
@@ -1237,6 +1282,7 @@ class _TripContent extends StatelessWidget {
                 checkingEditability: checkingEditability,
                 canEdit: canEdit,
                 busy: changingTime,
+                isPlanLeg: isPlanLeg,
                 onSave: onSave,
                 onEdit: onEdit,
                 onStartNavigation: onStartNavigation,
@@ -1335,6 +1381,7 @@ class _DetailsActions extends StatelessWidget {
     required this.checkingEditability,
     required this.canEdit,
     required this.busy,
+    required this.isPlanLeg,
     required this.onSave,
     required this.onEdit,
     required this.onStartNavigation,
@@ -1348,6 +1395,13 @@ class _DetailsActions extends StatelessWidget {
   final bool checkingEditability;
 
   final bool canEdit;
+
+  // A plan leg auto-saves through the Edit flow's own "Save changes?"
+  // confirmation (see TripDetailsPage._edit/_saveToPlan) - the separate
+  // heart/"Save" button below is the general (non-plan) "add to Saved
+  // List" affordance, so it's hidden here to avoid looking like this
+  // leg has its own separate saved-list entry.
+  final bool isPlanLeg;
 
   final VoidCallback onSave;
   final VoidCallback onEdit;
@@ -1382,6 +1436,12 @@ class _DetailsActions extends StatelessWidget {
             Expanded(
               child: OutlinedButton.icon(
                 onPressed: !busy && (editing || canEdit) ? onEdit : null,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(43),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                ),
                 icon: editing
                     ? const Icon(Icons.check, size: 16)
                     : checkingEditability
@@ -1397,20 +1457,28 @@ class _DetailsActions extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: (editing || busy) ? null : onSave,
-                icon: Icon(
-                  saved ? Icons.favorite : Icons.favorite_border,
-                  size: 16,
-                ),
-                label: Text(
-                  saved ? 'Saved' : 'Save',
-                  style: const TextStyle(fontSize: 13),
+            if (!isPlanLeg) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: (editing || busy) ? null : onSave,
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(43),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                  ),
+                  icon: Icon(
+                    saved ? Icons.favorite : Icons.favorite_border,
+                    size: 16,
+                  ),
+                  label: Text(
+                    saved ? 'Saved' : 'Save',
+                    style: const TextStyle(fontSize: 13),
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
       ],

@@ -340,7 +340,16 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
                 style: const TextStyle(fontSize: 12, color: AppColors.muted),
               ),
               const SizedBox(height: 14),
-              OutlinedButton(onPressed: _retry, child: const Text('Retry')),
+              OutlinedButton(
+                onPressed: _retry,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(43),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                ),
+                child: const Text('Retry'),
+              ),
             ],
           ),
         ),
@@ -374,12 +383,19 @@ class _PlanTransportPageState extends State<PlanTransportPage> {
                 style: TextStyle(fontSize: 11.5, color: AppColors.muted),
               ),
               const SizedBox(height: 16),
-              FilledButton(
-                onPressed: _confirmAndPlan,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.green,
+              SizedBox(
+                width: double.infinity,
+                height: 43,
+                child: FilledButton(
+                  onPressed: _confirmAndPlan,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.green,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                  ),
+                  child: const Text('Plan Transportation'),
                 ),
-                child: const Text('Plan Transportation'),
               ),
             ],
           ),
@@ -637,6 +653,9 @@ class _UnplannedLegTile extends StatelessWidget {
                   side: const BorderSide(color: AppColors.orange),
                   minimumSize: const Size(0, 32),
                   padding: const EdgeInsets.symmetric(horizontal: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(7),
+                  ),
                 ),
                 icon: const Icon(Icons.refresh, size: 15),
                 label: const Text(

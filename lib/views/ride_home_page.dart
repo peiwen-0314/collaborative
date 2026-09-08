@@ -368,7 +368,16 @@ class _TransportationPageState extends State<TransportationPage> {
   Future<void> _openTravelPreferences() async {
     await TravelPreferencesSheet.show(context, _controller);
     if (!mounted) return;
-    if (_from != null && _to != null) unawaited(_search());
+    if (_from != null && _to != null) {
+      unawaited(_search());
+    } else {
+      // No active from/to search - refresh the Recommended panel
+      // instead, now that saveTravelPreferences() has cleared its
+      // cache, so it re-scores under the preferences just changed
+      // rather than keep showing the pre-change suggestion.
+      setState(() => _recommendationLoading = true);
+      unawaited(_loadRecommendation());
+    }
   }
 
   void _openSavedTrip(SavedTrip trip) {
@@ -469,7 +478,7 @@ class _TransportationPageState extends State<TransportationPage> {
                           onPressed: _openSavedList,
                           tooltip: 'Saved trips',
                           icon: const Icon(
-                            Icons.bookmark_border_rounded,
+                            Icons.favorite_border_rounded,
                             color: AppColors.green,
                           ),
                         ),
@@ -516,6 +525,9 @@ class _TransportationPageState extends State<TransportationPage> {
                             minimumSize: const Size(0, 32),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(7),
                             ),
                           ),
                           icon: const Icon(Icons.my_location, size: 15),
@@ -642,7 +654,16 @@ class _TransportationPageState extends State<TransportationPage> {
             children: [
               Text(_error!, style: const TextStyle(color: AppColors.muted)),
               const SizedBox(height: 8),
-              OutlinedButton(onPressed: _search, child: const Text('Retry')),
+              OutlinedButton(
+                onPressed: _search,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(43),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                ),
+                child: const Text('Retry'),
+              ),
             ],
           ),
         ),
@@ -683,7 +704,8 @@ class _TransportationPageState extends State<TransportationPage> {
       for (final group in groups) ...[
         Tooltip(
           message: '${group.from.name}  →  ${group.to.name}',
-          waitDuration: const Duration(milliseconds: 400),
+          triggerMode: TooltipTriggerMode.tap,
+          showDuration: const Duration(seconds: 3),
           child: Text(
             '${shortPlaceName(group.from.name)}  →  ${shortPlaceName(group.to.name)}',
             maxLines: 1,

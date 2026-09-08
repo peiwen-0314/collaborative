@@ -206,7 +206,16 @@ class _SavedListPageState extends State<SavedListPage> {
                 style: const TextStyle(fontSize: 12, color: AppColors.muted),
               ),
               const SizedBox(height: 14),
-              OutlinedButton(onPressed: _load, child: const Text('Retry')),
+              OutlinedButton(
+                onPressed: _load,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(43),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                ),
+                child: const Text('Retry'),
+              ),
             ],
           ),
         ),
@@ -248,7 +257,8 @@ class _SavedListPageState extends State<SavedListPage> {
               padding: const EdgeInsets.only(left: 8, bottom: 7),
               child: Tooltip(
                 message: '${group.from.name}  →  ${group.to.name}',
-                waitDuration: const Duration(milliseconds: 400),
+                triggerMode: TooltipTriggerMode.tap,
+                showDuration: const Duration(seconds: 3),
                 child: Text(
                   '${shortPlaceName(group.from.name)}  →  ${shortPlaceName(group.to.name)}',
                   maxLines: 1,

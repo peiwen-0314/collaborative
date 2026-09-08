@@ -288,9 +288,9 @@ class TransportService {
     required LocationPoint to,
     required DateTime departAt,
   }) async {
+    await ApiConfig.ensureLoaded();
     if (!ApiConfig.hasHereApiKey) return const [];
     try {
-      await ApiConfig.ensureLoaded();
       _here ??= HereTransitService();
       final options = await _here!.search(
         from: from,
@@ -316,9 +316,9 @@ class TransportService {
     required DateTime departAt,
     required double plainWalkKm,
   }) async {
+    await ApiConfig.ensureLoaded();
     if (!ApiConfig.hasHereApiKey) return null;
     try {
-      await ApiConfig.ensureLoaded();
       _here ??= HereTransitService();
       return await findTransitHop(
         here: _here,

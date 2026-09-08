@@ -98,7 +98,16 @@ class _TripPlansPageState extends State<TripPlansPage> {
                 style: const TextStyle(fontSize: 12, color: AppColors.muted),
               ),
               const SizedBox(height: 14),
-              OutlinedButton(onPressed: _load, child: const Text('Retry')),
+              OutlinedButton(
+                onPressed: _load,
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(43),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                ),
+                child: const Text('Retry'),
+              ),
             ],
           ),
         ),

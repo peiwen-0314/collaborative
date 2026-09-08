@@ -58,21 +58,6 @@ class AuthController {
     }
   }
 
-  // ============================================================
-  // PASSWORD RULES
-  // At least 8 characters, with an uppercase letter, a lowercase
-  // letter, a number, and a special character - checked in this fixed
-  // order so a person only ever sees one thing to fix at a time
-  // instead of every rule they're missing at once. "Special character"
-  // is anything that isn't a plain letter or digit, so there's no
-  // punctuation list to keep in sync between this check and the hint
-  // shown on RegisterPage.
-  // ============================================================
-  // Single source of truth for every password rule, in the order they
-  // should be shown/checked. RegisterPage renders this live (one row
-  // per rule, each with its own pass/fail icon) as the person types -
-  // see its passwordChecklist field - instead of only ever showing one
-  // aggregate hint.
   Map<String, bool> passwordRuleChecklist(String password) {
     return {
       'At least 8 characters': password.length >= 8,
@@ -327,5 +312,38 @@ class AuthController {
 
   Future<void> updateProfile({String? name, String? photoUrl}) {
     return _authService.updateProfile(name: name, photoUrl: photoUrl);
+  }
+
+  // ============================================================
+  // CHANGE PASSWORD (in-app)
+  // ============================================================
+  Future<String?> changePassword({
+    required String currentPassword,
+    required String newPassword,
+    required String confirmPassword,
+  }) async {
+    if (currentPassword.isEmpty ||
+        newPassword.isEmpty ||
+        confirmPassword.isEmpty) {
+      return 'Please fill in all fields';
+    }
+
+    if (newPassword != confirmPassword) {
+      return 'New passwords do not match';
+    }
+
+    final passwordRuleError = _passwordRuleError(newPassword);
+    if (passwordRuleError != null) {
+      return passwordRuleError;
+    }
+
+    if (newPassword == currentPassword) {
+      return 'New password must be different from your current password';
+    }
+
+    return _authService.changePassword(
+      currentPassword: currentPassword,
+      newPassword: newPassword,
+    );
   }
 }

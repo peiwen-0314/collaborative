@@ -523,9 +523,17 @@ class TransportController {
       _travelPreferencesService.load();
 
   /// Saves [preferences] for future searchRides calls to pick up - see
-  /// TravelPreferencesSheet's Save button.
-  Future<void> saveTravelPreferences(TravelPreferences preferences) =>
-      _travelPreferencesService.save(preferences);
+  /// TravelPreferencesSheet's Save button. Also clears the cached
+  /// "today's recommendation" (see _todaysStatusCache /
+  /// todaysTransportStatus) - without this, RecommendedPanel could keep
+  /// showing a suggestion computed under the OLD preferences for up to
+  /// _todaysStatusCacheTtl, ignoring the filter the person just applied.
+  Future<void> saveTravelPreferences(TravelPreferences preferences) async {
+    await _travelPreferencesService.save(preferences);
+    _todaysStatusCache = null;
+    _todaysStatusCachedAt = null;
+    _todaysStatusCachedFrom = null;
+  }
 
   Future<void> recordOptionSelection(
     RideOption selected,
