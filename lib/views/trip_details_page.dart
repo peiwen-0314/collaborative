@@ -18,14 +18,15 @@ import '../services/destination_photo_service.dart';
 import '../services/transit_hop_finder.dart';
 import '../widgets/location_row.dart';
 import '../widgets/trip_widgets.dart';
+import '../services/carbon_saving_service.dart';
 
 List<Widget> _timelineItems(
-  List<TripLeg> legs, {
-  required LocationPoint from,
-  bool editing = false,
-  Set<int> editableLegIndices = const {},
-  void Function(int legIndex)? onLegTap,
-}) {
+    List<TripLeg> legs, {
+      required LocationPoint from,
+      bool editing = false,
+      Set<int> editableLegIndices = const {},
+      void Function(int legIndex)? onLegTap,
+    }) {
   final items = <Widget>[];
 
   bool isRealTransitLeg(TripLeg leg) =>
@@ -150,10 +151,10 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   );
 
   void _showSnack(
-    String message, {
-    Duration duration = const Duration(seconds: 2),
-    bool isError = false,
-  }) {
+      String message, {
+        Duration duration = const Duration(seconds: 2),
+        bool isError = false,
+      }) {
     final screenWidth = MediaQuery.of(context).size.width;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -417,8 +418,8 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         });
         _showSnack(
           'Switched to a real alternative - now departing '
-          '${formatFriendlyDateTime(replaced.departTime)}, confirmed '
-          'against the real schedule.',
+              '${formatFriendlyDateTime(replaced.departTime)}, confirmed '
+              'against the real schedule.',
           duration: const Duration(seconds: 4),
         );
         await _loadLegAlternatives();
@@ -435,9 +436,9 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
         });
         _showSnack(
           'Updated to depart '
-          '${formatFriendlyDateTime(estimatedFallback.departTime)} - '
-          'could not confirm this route runs then, so the time is '
-          'estimated.',
+              '${formatFriendlyDateTime(estimatedFallback.departTime)} - '
+              'could not confirm this route runs then, so the time is '
+              'estimated.',
           duration: const Duration(seconds: 4),
         );
         await _loadLegAlternatives();
@@ -457,7 +458,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       if (result.options.isEmpty) {
         _showSnack(
           'Could not find any real route for that date - try a '
-          'different time.',
+              'different time.',
           isError: true,
           duration: const Duration(seconds: 4),
         );
@@ -471,7 +472,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       });
       _showSnack(
         'Found a new real route departing '
-        '${formatFriendlyDateTime(_option.departTime)}.',
+            '${formatFriendlyDateTime(_option.departTime)}.',
         duration: const Duration(seconds: 4),
       );
       await _loadLegAlternatives();
@@ -549,7 +550,7 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
           title: const Text('Save changes?'),
           content: const Text(
             "You've changed part of this trip. Save it with these "
-            'changes, or go back to how it was before?',
+                'changes, or go back to how it was before?',
           ),
           actions: [
             TextButton(
@@ -767,17 +768,17 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
       _option = rebuilt.tags.contains('Edited')
           ? rebuilt
           : RideOption(
-              id: rebuilt.id,
-              title: rebuilt.title,
-              legs: rebuilt.legs,
-              estCostRm: rebuilt.estCostRm,
-              co2Kg: rebuilt.co2Kg,
-              tags: [...rebuilt.tags, 'Edited'],
-              searchDepartAt: rebuilt.searchDepartAt,
-              isLiveData: rebuilt.isLiveData,
-              path: rebuilt.path,
-              delayEstimate: rebuilt.delayEstimate,
-            );
+        id: rebuilt.id,
+        title: rebuilt.title,
+        legs: rebuilt.legs,
+        estCostRm: rebuilt.estCostRm,
+        co2Kg: rebuilt.co2Kg,
+        tags: [...rebuilt.tags, 'Edited'],
+        searchDepartAt: rebuilt.searchDepartAt,
+        isLiveData: rebuilt.isLiveData,
+        path: rebuilt.path,
+        delayEstimate: rebuilt.delayEstimate,
+      );
       _hasPendingEdits = true;
       _saved = false;
       _legAlternatives = {};
@@ -793,14 +794,17 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
   // mixed walk+bus+walk option still opens as 'transit' overall.
   static String _googleMapsTravelMode(RideOption option) {
     final realLegs = option.legs.where((leg) => !leg.isTransfer).toList();
+
     if (realLegs.isEmpty ||
         realLegs.every((leg) => leg.mode == TransportMode.walk)) {
       return 'walking';
     }
+
     final primary = realLegs.firstWhere(
-      (leg) => leg.mode != TransportMode.walk,
+          (leg) => leg.mode != TransportMode.walk,
       orElse: () => realLegs.first,
     );
+
     switch (primary.mode) {
       case TransportMode.bike:
         return 'bicycling';
@@ -817,22 +821,34 @@ class _TripDetailsPageState extends State<TripDetailsPage> {
     }
   }
 
-  // Opens the person's own Google Maps app/site with the origin,
-  // destination, and the travel mode this app already planned for the
-  // trip (see _googleMapsTravelMode) - so Google Maps opens straight
-  // into the same kind of route instead of a generic/default one.
+  // Records the selected trip's CO₂ saving for Gamification, then opens
+  // the person's own Google Maps app/site using the planned travel mode.
   Future<void> _startNavigation() async {
+    try {
+      await CarbonSavingService().recordCarbonSaving(
+        tripId: _option.id,
+        distanceKm: _option.totalDistanceKm,
+        selectedRouteCo2Kg: _option.co2Kg,
+      );
+    } catch (error) {
+      debugPrint('[TripDetailsPage] carbon saving failed: $error');
+    }
+
+    if (!mounted) return;
+
     final uri = Uri.https('www.google.com', '/maps/dir/', {
       'api': '1',
       'origin': _from.coordinateString,
       'destination': widget.to.coordinateString,
       'travelmode': _googleMapsTravelMode(_option),
     });
+
     try {
       final launched = await launchUrl(
         uri,
         mode: LaunchMode.externalApplication,
       );
+
       if (!launched && mounted) {
         _showSnack('Could not open Google Maps.', isError: true);
       }
@@ -1151,142 +1167,142 @@ class _TripContent extends StatelessWidget {
               ),
               child: Column(
                 children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: InkWell(
-                  onTap: (allowTimeChange && !changingTime)
-                      ? onChangeTime
-                      : null,
-                  borderRadius: BorderRadius.circular(6),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.event_outlined,
-                        size: 15,
-                        color: AppColors.muted,
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                'Departs ${formatFriendlyDateTime(option.departTime)}',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: AppColors.muted,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (!isSavedTrip &&
-                                option.waitBeforeDeparture >
-                                    const Duration(minutes: 15))
-                              Padding(
-                                padding: const EdgeInsets.only(left: 6),
-                                child: Text(
-                                  'Wait ${formatDuration(option.waitBeforeDeparture)}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: AppColors.orange,
-                                    fontWeight: FontWeight.w600,
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: InkWell(
+                      onTap: (allowTimeChange && !changingTime)
+                          ? onChangeTime
+                          : null,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.event_outlined,
+                            size: 15,
+                            color: AppColors.muted,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    'Departs ${formatFriendlyDateTime(option.departTime)}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: AppColors.muted,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      if (allowTimeChange)
-                        changingTime
-                            ? const SizedBox(
-                                width: 12,
-                                height: 12,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(
-                                Icons.edit_outlined,
-                                size: 13,
-                                color: AppColors.green,
-                              ),
-                    ],
-                  ),
-                ),
-              ),
-              InkWell(
-                onTap: (isPlanLeg && !changingFrom) ? onChangeFrom : null,
-                borderRadius: BorderRadius.circular(6),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: LocationRow(
-                        label: 'From',
-                        value: from.name,
-                        color: AppColors.green,
-                      ),
-                    ),
-                    if (isPlanLeg) ...[
-                      const SizedBox(width: 6),
-                      changingFrom
-                          ? const SizedBox(
+                                if (!isSavedTrip &&
+                                    option.waitBeforeDeparture >
+                                        const Duration(minutes: 15))
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 6),
+                                    child: Text(
+                                      'Wait ${formatDuration(option.waitBeforeDeparture)}',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.orange,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (allowTimeChange)
+                            changingTime
+                                ? const SizedBox(
                               width: 12,
                               height: 12,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                              ),
                             )
-                          : const Icon(
+                                : const Icon(
                               Icons.edit_outlined,
                               size: 13,
                               color: AppColors.green,
                             ),
-                    ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: (isPlanLeg && !changingFrom) ? onChangeFrom : null,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: LocationRow(
+                            label: 'From',
+                            value: from.name,
+                            color: AppColors.green,
+                          ),
+                        ),
+                        if (isPlanLeg) ...[
+                          const SizedBox(width: 6),
+                          changingFrom
+                              ? const SizedBox(
+                            width: 12,
+                            height: 12,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                              : const Icon(
+                            Icons.edit_outlined,
+                            size: 13,
+                            color: AppColors.green,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 18),
+                  LocationRow(
+                    label: 'To',
+                    value: to.name,
+                    color: AppColors.orange,
+                    outlined: true,
+                  ),
+                  const SizedBox(height: 10),
+                  TripSummary(option: option, from: from),
+                  if (option.delayEstimate != null) ...[
+                    const SizedBox(height: 10),
+                    _DelayEstimateBanner(estimate: option.delayEstimate!),
                   ],
-                ),
-              ),
-              const Divider(height: 18),
-              LocationRow(
-                label: 'To',
-                value: to.name,
-                color: AppColors.orange,
-                outlined: true,
-              ),
-              const SizedBox(height: 10),
-              TripSummary(option: option, from: from),
-              if (option.delayEstimate != null) ...[
-                const SizedBox(height: 10),
-                _DelayEstimateBanner(estimate: option.delayEstimate!),
-              ],
-              const SizedBox(height: 22),
-              if (editing && loadingAlternatives)
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 10),
-                  child: LinearProgressIndicator(minHeight: 3),
-                ),
-              ..._timelineItems(
-                option.legs,
-                from: from,
-                editing: editing,
-                editableLegIndices: editableLegIndices,
-                onLegTap: onLegTap,
-              ),
-              DestinationRow(
-                arrivalTimeLabel: formatClockTime(option.arriveTime),
-                destinationLabel: to.name,
-              ),
-              const SizedBox(height: 22),
-              const Spacer(),
-              _DetailsActions(
-                saved: saved,
-                editing: editing,
-                checkingEditability: checkingEditability,
-                canEdit: canEdit,
-                busy: changingTime,
-                isPlanLeg: isPlanLeg,
-                onSave: onSave,
-                onEdit: onEdit,
-                onStartNavigation: onStartNavigation,
-              ),
+                  const SizedBox(height: 22),
+                  if (editing && loadingAlternatives)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 10),
+                      child: LinearProgressIndicator(minHeight: 3),
+                    ),
+                  ..._timelineItems(
+                    option.legs,
+                    from: from,
+                    editing: editing,
+                    editableLegIndices: editableLegIndices,
+                    onLegTap: onLegTap,
+                  ),
+                  DestinationRow(
+                    arrivalTimeLabel: formatClockTime(option.arriveTime),
+                    destinationLabel: to.name,
+                  ),
+                  const SizedBox(height: 22),
+                  const Spacer(),
+                  _DetailsActions(
+                    saved: saved,
+                    editing: editing,
+                    checkingEditability: checkingEditability,
+                    canEdit: canEdit,
+                    busy: changingTime,
+                    isPlanLeg: isPlanLeg,
+                    onSave: onSave,
+                    onEdit: onEdit,
+                    onStartNavigation: onStartNavigation,
+                  ),
                 ],
               ),
             ),
@@ -1446,10 +1462,10 @@ class _DetailsActions extends StatelessWidget {
                     ? const Icon(Icons.check, size: 16)
                     : checkingEditability
                     ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
                     : const Icon(Icons.edit_outlined, size: 16),
                 label: Text(
                   editing ? 'Done' : 'Edit',
@@ -1488,7 +1504,7 @@ class _DetailsActions extends StatelessWidget {
 
 String _alternativeSummary(RideOption alt) {
   final realLegs = alt.legs.where(
-    (leg) => !leg.isTransfer && leg.mode != TransportMode.walk,
+        (leg) => !leg.isTransfer && leg.mode != TransportMode.walk,
   );
   if (realLegs.isEmpty) return 'Walk only';
   final modeLabel = realLegs.first.mode.label;
@@ -1531,7 +1547,7 @@ class _LegAlternativesSheet extends StatelessWidget {
                 itemBuilder: (context, index) {
                   final option = alternatives[index];
                   final realLeg = option.legs.firstWhere(
-                    (leg) => !leg.isTransfer && leg.mode != TransportMode.walk,
+                        (leg) => !leg.isTransfer && leg.mode != TransportMode.walk,
                     orElse: () => option.legs.first,
                   );
                   return ListTile(
@@ -1552,8 +1568,8 @@ class _LegAlternativesSheet extends StatelessWidget {
                     ),
                     subtitle: Text(
                       '${formatClockTime(option.departTime)} - '
-                      '${formatClockTime(option.arriveTime)}  '
-                      '(${formatDuration(option.totalDuration)})',
+                          '${formatClockTime(option.arriveTime)}  '
+                          '(${formatDuration(option.totalDuration)})',
                     ),
                     trailing: Text(
                       'RM ${option.estCostRm.toStringAsFixed(2)}',
@@ -1606,7 +1622,7 @@ class _ScheduleFallbackSheet extends StatelessWidget {
                 icon: Icons.swap_horiz,
                 title: 'Switch to ${_alternativeSummary(alt)}',
                 subtitle:
-                    'Real departure ${formatClockTime(alt.departTime)} - '
+                'Real departure ${formatClockTime(alt.departTime)} - '
                     'confirmed against the real schedule',
                 onTap: () => Navigator.of(
                   context,
@@ -1716,7 +1732,7 @@ class _DownstreamLegSwitchSheet extends StatelessWidget {
           children: [
             Text(
               "$wantedLabel doesn't seem to run around the time this "
-              'edit leaves it',
+                  'edit leaves it',
               style: const TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
@@ -1732,7 +1748,7 @@ class _DownstreamLegSwitchSheet extends StatelessWidget {
               icon: Icons.swap_horiz,
               title: 'Switch to ${_alternativeSummary(alternative)}',
               subtitle:
-                  'Real departure ${formatClockTime(alternative.departTime)} '
+              'Real departure ${formatClockTime(alternative.departTime)} '
                   '- confirmed against the real schedule',
               onTap: () => Navigator.of(context).pop(true),
             ),
@@ -1741,7 +1757,7 @@ class _DownstreamLegSwitchSheet extends StatelessWidget {
               icon: Icons.schedule_outlined,
               title: 'Keep the estimated time',
               subtitle:
-                  'Not confirmed against a real schedule for this stretch',
+              'Not confirmed against a real schedule for this stretch',
               onTap: () => Navigator.of(context).pop(false),
             ),
           ],

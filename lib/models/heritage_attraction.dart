@@ -101,6 +101,7 @@ class HeritageAttraction {
   final String stampImageUrl;
 
   String get attractionId => id;
+  String get mapStatus => 'available';
 
   String get heritageType => category;
 
