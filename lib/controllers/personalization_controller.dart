@@ -149,6 +149,7 @@ class PersonalizationController extends ChangeNotifier {
   final List<AttractionModel> _allActiveAttractions = [];
   final List<AttractionModel> _recommendedAttractions = [];
   final Set<String> _selectedInterestIds = {};
+  final Set<String> _activeCategoryIds = {};
 
   Map<String, double> _preferenceScores = {};
   Map<String, double> _locationScores = {};
@@ -410,25 +411,52 @@ class PersonalizationController extends ChangeNotifier {
       _errorMessage = null;
       notifyListeners();
 
+      final results = await Future.wait([
+        _firestore.collection('attractions').get(),
+        _firestore.collection('categories').get(),
+      ]);
+
       final attractionSnapshot =
-      await _firestore
-          .collection('attractions')
-          .get();
+      results[0] as QuerySnapshot<Map<String, dynamic>>;
+      final categorySnapshot =
+      results[1] as QuerySnapshot<Map<String, dynamic>>;
+
+      _activeCategoryIds
+        ..clear()
+        ..addAll(
+          categorySnapshot.docs
+              .where((doc) {
+            return (doc.data()['status'] ?? 'Active')
+                .toString()
+                .trim()
+                .toLowerCase() ==
+                'active';
+          })
+              .map((doc) => doc.id),
+        );
 
       _allActiveAttractions
         ..clear()
         ..addAll(
           attractionSnapshot.docs
-              .map(
-            AttractionModel.fromFirestore,
-          )
-              .where(
-                (item) =>
-            item.status
-                .trim()
-                .toLowerCase() ==
-                'active',
-          ),
+              .map(AttractionModel.fromFirestore)
+              .where((item) {
+            if (item.status.trim().toLowerCase() != 'active') {
+              return false;
+            }
+
+            final ids = <String>{
+              ...item.categoryIds
+                  .map((id) => id.trim())
+                  .where((id) => id.isNotEmpty),
+              if (item.categoryId.trim().isNotEmpty)
+                item.categoryId.trim(),
+            };
+
+            // User-facing recommendation/search only receives an
+            // attraction when at least one of its categories is Active.
+            return ids.any(_activeCategoryIds.contains);
+          }),
         );
 
       _preferenceScores = {};

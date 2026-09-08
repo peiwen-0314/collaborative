@@ -631,6 +631,11 @@ class _SavedTripPlanDetailPageState
 
   int selectedDay = 0;
 
+  /// Current Active categories from Firestore.
+  /// Saved plans may contain old category names, so the UI verifies
+  /// category status before showing chips.
+  final Map<String, String> _activeCategories = {};
+
   final TransportController _transportController =
   TransportController();
   final LocationService _locationService = const LocationService();
@@ -646,7 +651,52 @@ class _SavedTripPlanDetailPageState
   @override
   void initState() {
     super.initState();
+    _loadActiveCategories();
     _loadTransportLegs();
+  }
+
+  Future<void> _loadActiveCategories() async {
+    try {
+      final snapshot =
+      await FirebaseFirestore.instance
+          .collection('categories')
+          .get();
+
+      final map = <String, String>{};
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+
+        final status =
+        (data['status'] ?? 'Active')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+        if (status != 'active') {
+          continue;
+        }
+
+        final name =
+        (data['name'] ?? '')
+            .toString()
+            .trim();
+
+        map[doc.id] = name;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _activeCategories
+          ..clear()
+          ..addAll(map);
+      });
+    } catch (e) {
+      debugPrint(
+        '[SavedTripPlanDetailPage] load active categories failed: $e',
+      );
+    }
   }
 
   Future<void> _loadTransportLegs() async {
@@ -814,12 +864,12 @@ class _SavedTripPlanDetailPageState
     );
     final openingAt = attraction?.openingDateTime(dayDate);
     final newVisitStart =
-        (openingAt != null && option.arriveTime.isBefore(openingAt))
+    (openingAt != null && option.arriveTime.isBefore(openingAt))
         ? openingAt
         : option.arriveTime;
     final visitMinutes =
         attraction?.recommendedVisitMinutes ??
-        leg.visitEnd.difference(leg.visitStart).inMinutes;
+            leg.visitEnd.difference(leg.visitStart).inMinutes;
     final newVisitEnd = newVisitStart.add(Duration(minutes: visitMinutes));
 
     // Editing this leg's transport can move its arrival time - shift
@@ -1838,34 +1888,44 @@ class _SavedTripPlanDetailPageState
   List<String> _categoryTags(
       Map<String, dynamic> attraction,
       ) {
-    final result = <String>{};
+    final ids = <String>[];
 
-    final raw =
-    attraction['categoryNames'];
+    final rawIds = attraction['categoryIds'];
 
-    if (raw is List) {
-      for (final item in raw) {
-        final value =
-        item.toString().trim();
+    if (rawIds is List) {
+      for (final item in rawIds) {
+        final id = item.toString().trim();
 
-        if (value.isNotEmpty) {
-          result.add(value);
+        if (id.isNotEmpty && !ids.contains(id)) {
+          ids.add(id);
         }
       }
     }
 
-    final primary =
-    (attraction['categoryName'] ?? '')
+    final primaryId =
+    (attraction['categoryId'] ?? '')
         .toString()
         .trim();
 
-    if (primary.isNotEmpty) {
-      result.add(primary);
+    if (primaryId.isNotEmpty && !ids.contains(primaryId)) {
+      ids.insert(0, primaryId);
+    }
+
+    final result = <String>[];
+
+    for (final id in ids) {
+      final name = _activeCategories[id];
+
+      if (name != null &&
+          name.trim().isNotEmpty &&
+          !result.contains(name.trim())) {
+        result.add(name.trim());
+      }
     }
 
     return result.isEmpty
-        ? ['Attraction']
-        : result.toList();
+        ? <String>['Attraction']
+        : result;
   }
 
   Widget _categoryChip(

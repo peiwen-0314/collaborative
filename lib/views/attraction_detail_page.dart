@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/attraction.dart';
@@ -215,36 +216,42 @@ class AttractionDetailPage extends StatelessWidget {
                       // =================================================
                       // CATEGORY + LOCATION
                       // =================================================
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 6,
-                        children: [
-                          if (attraction.categoryName.trim().isNotEmpty)
-                            _pill(
-                              attraction.categoryName,
-                            ),
+                      FutureBuilder<List<String>>(
+                        future: _loadActiveCategoryNames(),
+                        builder: (context, snapshot) {
+                          final categories =
+                              snapshot.data ?? const <String>[];
 
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
+                          return Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            crossAxisAlignment:
+                            WrapCrossAlignment.center,
                             children: [
-                              const Icon(
-                                Icons.location_on_outlined,
-                                color: mainGreen,
-                                size: 13,
-                              ),
+                              // Display ALL currently Active categories.
+                              ...categories.map(_pill),
 
-                              const SizedBox(width: 3),
-
-                              Text(
-                                _locationText(),
-                                style: const TextStyle(
-                                  color: mainGreen,
-                                  fontSize: 9,
-                                ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.location_on_outlined,
+                                    color: mainGreen,
+                                    size: 13,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    _locationText(),
+                                    style: const TextStyle(
+                                      color: mainGreen,
+                                      fontSize: 9,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
-                          ),
-                        ],
+                          );
+                        },
                       ),
 
                       const SizedBox(height: 10),
@@ -800,6 +807,79 @@ class AttractionDetailPage extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  // ============================================================
+  // ACTIVE CATEGORY NAMES
+  // ============================================================
+  //
+  // The attraction document may still contain old category names.
+  // This method checks the current category documents and returns
+  // only categories whose status is Active.
+  //
+  Future<List<String>> _loadActiveCategoryNames() async {
+    final ids = <String>[];
+
+    for (final id in attraction.categoryIds) {
+      final clean = id.trim();
+      if (clean.isNotEmpty && !ids.contains(clean)) {
+        ids.add(clean);
+      }
+    }
+
+    final primaryId = attraction.categoryId.trim();
+
+    if (primaryId.isNotEmpty && !ids.contains(primaryId)) {
+      ids.insert(0, primaryId);
+    }
+
+    if (ids.isEmpty) {
+      return const <String>[];
+    }
+
+    final docs = await Future.wait(
+      ids.map(
+            (id) => FirebaseFirestore.instance
+            .collection('categories')
+            .doc(id)
+            .get(),
+      ),
+    );
+
+    final result = <String>[];
+
+    for (final doc in docs) {
+      if (!doc.exists) {
+        continue;
+      }
+
+      final data = doc.data();
+
+      if (data == null) {
+        continue;
+      }
+
+      final status =
+      (data['status'] ?? 'Active')
+          .toString()
+          .trim()
+          .toLowerCase();
+
+      if (status != 'active') {
+        continue;
+      }
+
+      final name =
+      (data['name'] ?? '')
+          .toString()
+          .trim();
+
+      if (name.isNotEmpty && !result.contains(name)) {
+        result.add(name);
+      }
+    }
+
+    return result;
   }
 
   // ============================================================

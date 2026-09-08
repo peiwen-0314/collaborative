@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'gamification_home_page.dart';
@@ -85,6 +86,10 @@ class _HomePageState extends State<HomePage> {
   Set<String> _savedAttractionIds =
   <String>{};
 
+  /// Current Active categories from Firestore.
+  /// Home recommendation chips only use this map.
+  final Map<String, String> _activeCategories = {};
+
   /// The signed-in user's own Firestore users/{uid} doc (name/email/
   /// photoUrl) - see ProfilePage, which is where this is actually kept
   /// up to date. Loaded once here too so the header's greeting/avatar
@@ -112,6 +117,7 @@ class _HomePageState extends State<HomePage> {
 
     _controller.loadHomeData();
     _personalizationController.loadRecommendations();
+    _loadActiveCategories();
     _loadProfile();
     _listenToSavedAttractions();
 
@@ -140,6 +146,133 @@ class _HomePageState extends State<HomePage> {
             );
           },
         );
+  }
+
+  Future<void> _loadActiveCategories() async {
+    try {
+      final snapshot =
+      await FirebaseFirestore.instance
+          .collection('categories')
+          .get();
+
+      final active = <String, String>{};
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+
+        final status =
+        (data['status'] ?? 'Active')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+        if (status != 'active') {
+          continue;
+        }
+
+        final name =
+        (data['name'] ?? '')
+            .toString()
+            .trim();
+
+        if (name.isNotEmpty) {
+          active[doc.id] = name;
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _activeCategories
+          ..clear()
+          ..addAll(active);
+      });
+    } catch (e) {
+      debugPrint(
+        'Home active category loading error: $e',
+      );
+    }
+  }
+
+  AttractionModel? _sanitizeRecommendation(
+      AttractionModel attraction,
+      ) {
+    if (attraction.status.trim().toLowerCase() != 'active') {
+      return null;
+    }
+
+    final ids = <String>[];
+
+    for (final rawId in attraction.categoryIds) {
+      final id = rawId.trim();
+
+      if (id.isNotEmpty && !ids.contains(id)) {
+        ids.add(id);
+      }
+    }
+
+    final oldPrimaryId =
+    attraction.categoryId.trim();
+
+    if (oldPrimaryId.isNotEmpty &&
+        !ids.contains(oldPrimaryId)) {
+      ids.insert(0, oldPrimaryId);
+    }
+
+    final activeIds = <String>[];
+    final activeNames = <String>[];
+
+    for (final id in ids) {
+      final name = _activeCategories[id];
+
+      if (name == null) {
+        // Inactive / Deleted category.
+        continue;
+      }
+
+      activeIds.add(id);
+      activeNames.add(name);
+    }
+
+    if (activeIds.isEmpty) {
+      return null;
+    }
+
+    final newPrimaryId =
+    activeIds.contains(oldPrimaryId)
+        ? oldPrimaryId
+        : activeIds.first;
+
+    final newPrimaryName =
+        _activeCategories[newPrimaryId] ??
+            activeNames.first;
+
+    return attraction.copyWith(
+      categoryId: newPrimaryId,
+      categoryName: newPrimaryName,
+      categoryIds: activeIds,
+      categoryNames: activeNames,
+    );
+  }
+
+  List<AttractionModel>
+  get _visibleRecommendedAttractions {
+    final result = <AttractionModel>[];
+
+    for (final attraction
+    in _personalizationController
+        .recommendedAttractions) {
+      final sanitized =
+      _sanitizeRecommendation(
+        attraction,
+      );
+
+      if (sanitized != null) {
+        result.add(sanitized);
+      }
+    }
+
+    return result;
   }
 
   Future<void> _toggleSavedAttraction(
@@ -194,13 +327,9 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openSavedAttractions() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-        const SavedAttractionsPage(),
-      ),
+  Future<void> _openSavedAttractions() async {
+    await _pushAndRefresh(
+      const SavedAttractionsPage(),
     );
   }
 
@@ -214,11 +343,10 @@ class _HomePageState extends State<HomePage> {
   /// can change their name/picture there, and this header should show
   /// that right away rather than only after the whole page is rebuilt
   /// some other way.
-  void _openProfile() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const ProfilePage()),
-    ).then((_) => _loadProfile());
+  Future<void> _openProfile() async {
+    await _pushAndRefresh(
+      const ProfilePage(),
+    );
   }
 
   void _refreshPage() {
@@ -230,9 +358,27 @@ class _HomePageState extends State<HomePage> {
   Future<void> _refreshHome() async {
     await Future.wait([
       _controller.refresh(),
-      _personalizationController
-          .refreshRecommendations(),
+      _personalizationController.refreshRecommendations(),
+      _loadActiveCategories(),
+      _loadProfile(),
     ]);
+
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _pushAndRefresh(Widget page) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => page,
+      ),
+    );
+
+    if (!mounted) return;
+
+    await _refreshHome();
   }
 
   Future<void> _showNearbyPopupOncePerRun() async {
@@ -573,13 +719,9 @@ class _HomePageState extends State<HomePage> {
                                     return;
                                   }
 
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) =>
-                                          HeritageDetailPage(
-                                            attraction: attraction,
-                                          ),
+                                  _pushAndRefresh(
+                                    HeritageDetailPage(
+                                      attraction: attraction,
                                     ),
                                   );
                                 },
@@ -629,32 +771,26 @@ class _HomePageState extends State<HomePage> {
   }
 
 
-  void _openAiTripPlanner() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const AiTripPlannerPage(),
-      ),
+  Future<void> _openAiTripPlanner() async {
+    await _pushAndRefresh(
+      const AiTripPlannerPage(),
     );
   }
 
-  void _openTransportation() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const TransportationPage(),
-      ),
+  Future<void> _openTransportation() async {
+    await _pushAndRefresh(
+      const TransportationPage(),
     );
   }
 
-  void _openCommunity() {
+  Future<void> _openCommunity() async {
     if (widget.onCommunityTap != null) {
       widget.onCommunityTap!();
       return;
     }
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const CommunityFeedPage()),
+
+    await _pushAndRefresh(
+      const CommunityFeedPage(),
     );
   }
 
@@ -930,27 +1066,21 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _openAttractionSearch() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AttractionSearchPage(
-          personalizationController:
-          _personalizationController,
-        ),
+  Future<void> _openAttractionSearch() async {
+    await _pushAndRefresh(
+      AttractionSearchPage(
+        personalizationController:
+        _personalizationController,
       ),
     );
   }
 
-  void _openAllRecommendations() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AttractionSearchPage(
-          personalizationController:
-          _personalizationController,
-          showRecommendationsInitially: true,
-        ),
+  Future<void> _openAllRecommendations() async {
+    await _pushAndRefresh(
+      AttractionSearchPage(
+        personalizationController:
+        _personalizationController,
+        showRecommendationsInitially: true,
       ),
     );
   }
@@ -1275,11 +1405,8 @@ class _HomePageState extends State<HomePage> {
               title: 'Cultural &\nHeritage',
               color: const Color(0xFFEDE0F8),
               onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const CulturalHeritagePage(),
-                  ),
+                _pushAndRefresh(
+                  const CulturalHeritagePage(),
                 );
               },
             ),
@@ -1306,12 +1433,8 @@ class _HomePageState extends State<HomePage> {
               title: 'Heritage\nPassport',
               color: const Color(0xFFEDE5FA),
               onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                    const GamificationHomePage(),
-                  ),
+                _pushAndRefresh(
+                  const GamificationHomePage(),
                 );
               },
             ),
@@ -1467,12 +1590,12 @@ class _HomePageState extends State<HomePage> {
 
   Widget _recommendationSection() {
     if (_controller.isLoading ||
-        _personalizationController.isLoadingRecommendations) {
+        _personalizationController
+            .isLoadingRecommendations) {
       return const SizedBox(
         height: 132,
         child: Center(
-          child:
-          CircularProgressIndicator(
+          child: CircularProgressIndicator(
             color: mainGreen,
             strokeWidth: 2.5,
           ),
@@ -1480,18 +1603,17 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
-    if (_personalizationController
-        .recommendedAttractions
-        .isEmpty) {
+    final recommendations =
+        _visibleRecommendedAttractions;
+
+    if (recommendations.isEmpty) {
       return Container(
         height: 90,
         width: double.infinity,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius:
-          BorderRadius.circular(
-            10,
-          ),
+          BorderRadius.circular(10),
         ),
         alignment: Alignment.center,
         child: const Text(
@@ -1506,30 +1628,20 @@ class _HomePageState extends State<HomePage> {
 
     return SizedBox(
       height: 132,
-
       child: ListView.separated(
         scrollDirection:
         Axis.horizontal,
-
-        itemCount: _personalizationController
-            .recommendedAttractions
-            .length,
-
+        itemCount:
+        recommendations.length,
         separatorBuilder:
             (context, index) =>
         const SizedBox(
           width: 8,
         ),
-
         itemBuilder:
             (context, index) {
-          final attraction =
-          _personalizationController
-              .recommendedAttractions[
-          index];
-
           return _recommendationCard(
-            attraction,
+            recommendations[index],
           );
         },
       ),
@@ -1557,18 +1669,15 @@ class _HomePageState extends State<HomePage> {
       width: 112,
 
       child: GestureDetector(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AttractionDetailPage(
-                attraction: attraction,
-              ),
-            ),
-          );
-
+        onTap: () async {
           _personalizationController.recordView(
             attraction,
+          );
+
+          await _pushAndRefresh(
+            AttractionDetailPage(
+              attraction: attraction,
+            ),
           );
         },
 
@@ -1809,24 +1918,36 @@ class _HomePageState extends State<HomePage> {
   List<String> _categoryTags(
       AttractionModel attraction,
       ) {
-    final tags = attraction.categoryNames
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .toSet()
-        .toList();
+    final tags = <String>[];
 
-    if (tags.isNotEmpty) {
-      return tags;
+    for (final id
+    in attraction.categoryIds) {
+      final name =
+      _activeCategories[id.trim()];
+
+      if (name != null &&
+          name.isNotEmpty &&
+          !tags.contains(name)) {
+        tags.add(name);
+      }
     }
 
-    final primary =
-    attraction.categoryName.trim();
+    // Backward-compatible primary category.
+    final primaryId =
+    attraction.categoryId.trim();
 
-    if (primary.isNotEmpty) {
-      return [primary];
+    final primaryName =
+    _activeCategories[primaryId];
+
+    if (primaryName != null &&
+        primaryName.isNotEmpty &&
+        !tags.contains(primaryName)) {
+      tags.insert(0, primaryName);
     }
 
-    return ['Attraction'];
+    return tags.isEmpty
+        ? <String>['Attraction']
+        : tags;
   }
 
   Widget _categoryChip(

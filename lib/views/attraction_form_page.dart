@@ -1801,7 +1801,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
       return;
     }
 
-    final selectedCategories = _controller.categories
+    final selectedCategories = _controller.activeCategories
         .where(
           (category) =>
           _selectedCategoryIds.contains(category.id),
@@ -2017,7 +2017,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
   }
 
   Widget _categoryMultiSelect() {
-    if (_controller.categories.isEmpty) {
+    if (_controller.activeCategories.isEmpty) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -2038,7 +2038,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
     return Wrap(
       spacing: 10,
       runSpacing: 10,
-      children: _controller.categories.map(
+      children: _controller.activeCategories.map(
             (category) {
           final selected =
           _selectedCategoryIds.contains(category.id);
@@ -2077,7 +2077,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
   }
 
   Widget _primaryCategoryDropdown() {
-    final selected = _controller.categories
+    final selected = _controller.activeCategories
         .where(
           (item) => _selectedCategoryIds.contains(item.id),
     )
@@ -2121,7 +2121,7 @@ class _AttractionFormPageState extends State<AttractionFormPage> {
   }
 
   CategoryModel? _findCategory(String id) {
-    for (final category in _controller.categories) {
+    for (final category in _controller.activeCategories) {
       if (category.id == id) return category;
     }
     return null;

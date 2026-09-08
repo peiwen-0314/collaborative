@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../controllers/personalization_controller.dart';
@@ -52,6 +53,10 @@ class _AttractionSearchPageState
   List<AttractionModel> _allAttractions = [];
   List<AttractionModel> _filteredAttractions = [];
 
+  /// Current Active categories from Firestore.
+  /// Inactive / Deleted categories are never shown, searched or filtered.
+  final Map<String, String> _activeCategories = {};
+
   bool _hasRecordedCurrentSearch = false;
 
   @override
@@ -62,7 +67,7 @@ class _AttractionSearchPageState
       _controllerChanged,
     );
 
-    _syncAttractions();
+    _loadActiveCategories();
   }
 
   @override
@@ -83,58 +88,173 @@ class _AttractionSearchPageState
     _syncAttractions();
   }
 
+  Future<void> _loadActiveCategories() async {
+    try {
+      final snapshot =
+      await FirebaseFirestore.instance
+          .collection('categories')
+          .get();
+
+      final active = <String, String>{};
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+
+        final status =
+        (data['status'] ?? 'Active')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+        if (status != 'active') {
+          continue;
+        }
+
+        final name =
+        (data['name'] ?? '')
+            .toString()
+            .trim();
+
+        if (name.isNotEmpty) {
+          active[doc.id] = name;
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _activeCategories
+          ..clear()
+          ..addAll(active);
+      });
+
+      _syncAttractions();
+    } catch (e) {
+      debugPrint(
+        'Load active categories in AttractionSearchPage error: $e',
+      );
+
+      if (!mounted) return;
+
+      // Fail closed: if category status cannot be verified,
+      // do not expose stale category tags.
+      setState(() {
+        _activeCategories.clear();
+      });
+
+      _syncAttractions();
+    }
+  }
+
   void _syncAttractions() {
-    _allAttractions = List<AttractionModel>.from(
+    final source = List<AttractionModel>.from(
       widget.personalizationController
           .allActiveAttractions,
     );
+
+    final sanitized = <AttractionModel>[];
+
+    for (final attraction in source) {
+      // Extra protection: user page only shows Active attractions.
+      if (attraction.status.trim().toLowerCase() != 'active') {
+        continue;
+      }
+
+      final clean =
+      _sanitizeAttractionCategories(
+        attraction,
+      );
+
+      // No Active categories left = do not show to user.
+      if (clean.categoryIds.isEmpty) {
+        continue;
+      }
+
+      sanitized.add(clean);
+    }
+
+    _allAttractions = sanitized;
+
+    if (_selectedCategoryId != null &&
+        !_activeCategories.containsKey(
+          _selectedCategoryId,
+        )) {
+      _selectedCategoryId = null;
+    }
 
     _applyFilters(
       recordSearch: false,
     );
   }
 
-  List<_FilterOption> get _categories {
-    final map = <String, String>{};
+  AttractionModel _sanitizeAttractionCategories(
+      AttractionModel attraction,
+      ) {
+    final ids = <String>[];
 
-    for (final attraction in _allAttractions) {
-      final ids = attraction.categoryIds
-          .map((item) => item.trim())
-          .where((item) => item.isNotEmpty)
-          .toList();
+    for (final rawId in attraction.categoryIds) {
+      final id = rawId.trim();
 
-      final names = attraction.categoryNames
-          .map((item) => item.trim())
-          .where((item) => item.isNotEmpty)
-          .toList();
-
-      // Multiple-category data: categoryIds and categoryNames are stored
-      // in matching positions.
-      final pairCount =
-      ids.length < names.length
-          ? ids.length
-          : names.length;
-
-      for (int i = 0; i < pairCount; i++) {
-        map[ids[i]] = names[i];
-      }
-
-      // Backward-compatible fallback for older attraction records.
-      final primaryId =
-      attraction.categoryId.trim();
-      final primaryName =
-      attraction.categoryName.trim();
-
-      if (primaryId.isNotEmpty &&
-          primaryName.isNotEmpty) {
-        map.putIfAbsent(
-          primaryId,
-              () => primaryName,
-        );
+      if (id.isNotEmpty && !ids.contains(id)) {
+        ids.add(id);
       }
     }
 
-    final result = map.entries
+    final oldPrimaryId =
+    attraction.categoryId.trim();
+
+    if (oldPrimaryId.isNotEmpty &&
+        !ids.contains(oldPrimaryId)) {
+      ids.insert(0, oldPrimaryId);
+    }
+
+    final activeIds = <String>[];
+    final activeNames = <String>[];
+
+    for (final id in ids) {
+      final activeName =
+      _activeCategories[id];
+
+      if (activeName == null) {
+        // Inactive / Deleted -> skip it completely.
+        continue;
+      }
+
+      activeIds.add(id);
+      activeNames.add(activeName);
+    }
+
+    if (activeIds.isEmpty) {
+      return attraction.copyWith(
+        categoryId: '',
+        categoryName: '',
+        categoryIds: const <String>[],
+        categoryNames: const <String>[],
+      );
+    }
+
+    final newPrimaryId =
+    activeIds.contains(oldPrimaryId)
+        ? oldPrimaryId
+        : activeIds.first;
+
+    final newPrimaryName =
+        _activeCategories[newPrimaryId] ??
+            activeNames.first;
+
+    return attraction.copyWith(
+      categoryId: newPrimaryId,
+      categoryName: newPrimaryName,
+      categoryIds: activeIds,
+      categoryNames: activeNames,
+    );
+  }
+
+  List<_FilterOption> get _categories {
+    // IMPORTANT:
+    // Show ALL Active categories from Firestore here,
+    // even if a category currently has zero attractions.
+    final result = _activeCategories.entries
         .map(
           (entry) => _FilterOption(
         id: entry.key,
@@ -723,6 +843,10 @@ class _AttractionSearchPageState
         await widget
             .personalizationController
             .refreshRecommendations();
+
+        await _loadActiveCategories();
+
+        if (!mounted) return;
 
         _syncAttractions();
       },

@@ -129,6 +129,8 @@ class AiTripPlannerController extends ChangeNotifier {
   List<AttractionModel> _generatedAttractions = [];
   List<TripScheduleItem> _generatedSchedule = [];
 
+  final Set<String> _activeCategoryIds = {};
+
   Map<String, double> _userPreferenceScores = {};
 
   final Map<String, HereRouteInfo> _routeCache = {};
@@ -168,24 +170,73 @@ class AiTripPlannerController extends ChangeNotifier {
       _errorMessage = null;
       notifyListeners();
 
-      final snapshot =
-      await _firestore.collection('attractions').get();
+      final results = await Future.wait([
+        _firestore.collection('attractions').get(),
+        _firestore.collection('categories').get(),
+      ]);
 
-      _allAttractions = snapshot.docs
+      final attractionSnapshot =
+      results[0] as QuerySnapshot<Map<String, dynamic>>;
+      final categorySnapshot =
+      results[1] as QuerySnapshot<Map<String, dynamic>>;
+
+      _activeCategoryIds
+        ..clear()
+        ..addAll(
+          categorySnapshot.docs
+              .where((doc) {
+            return (doc.data()['status'] ?? 'Active')
+                .toString()
+                .trim()
+                .toLowerCase() ==
+                'active';
+          })
+              .map((doc) => doc.id),
+        );
+
+      _allAttractions = attractionSnapshot.docs
           .map(AttractionModel.fromFirestore)
-          .where((attraction) {
-        return attraction.status.trim().toLowerCase() == 'active';
-      })
+          .where(_isAttractionAvailableForUser)
           .toList();
     } catch (e) {
       debugPrint('AI Trip Planner load attractions error: $e');
-
       _errorMessage = 'Unable to load attractions.';
       _allAttractions = [];
+      _activeCategoryIds.clear();
     } finally {
       _isLoading = false;
       notifyListeners();
     }
+  }
+
+  bool _isAttractionAvailableForUser(
+      AttractionModel attraction,
+      ) {
+    if (attraction.status.trim().toLowerCase() != 'active') {
+      return false;
+    }
+
+    final ids = <String>{
+      ...attraction.categoryIds
+          .map((id) => id.trim())
+          .where((id) => id.isNotEmpty),
+      if (attraction.categoryId.trim().isNotEmpty)
+        attraction.categoryId.trim(),
+    };
+
+    return ids.any(_activeCategoryIds.contains);
+  }
+
+  List<String> _activeCategoryIdsForAttraction(
+      AttractionModel attraction,
+      ) {
+    return <String>{
+      ...attraction.categoryIds
+          .map((id) => id.trim())
+          .where((id) => id.isNotEmpty),
+      if (attraction.categoryId.trim().isNotEmpty)
+        attraction.categoryId.trim(),
+    }.where(_activeCategoryIds.contains).toList();
   }
 
   void setStateSelection(String? value) {
@@ -386,18 +437,37 @@ class AiTripPlannerController extends ChangeNotifier {
   }
 
   Future<void> _ensureAttractionsLoaded() async {
-    if (_allAttractions.isNotEmpty) {
+    if (_allAttractions.isNotEmpty && _activeCategoryIds.isNotEmpty) {
       return;
     }
 
-    final snapshot =
-    await _firestore.collection('attractions').get();
+    final results = await Future.wait([
+      _firestore.collection('attractions').get(),
+      _firestore.collection('categories').get(),
+    ]);
 
-    _allAttractions = snapshot.docs
+    final attractionSnapshot =
+    results[0] as QuerySnapshot<Map<String, dynamic>>;
+    final categorySnapshot =
+    results[1] as QuerySnapshot<Map<String, dynamic>>;
+
+    _activeCategoryIds
+      ..clear()
+      ..addAll(
+        categorySnapshot.docs
+            .where((doc) {
+          return (doc.data()['status'] ?? 'Active')
+              .toString()
+              .trim()
+              .toLowerCase() ==
+              'active';
+        })
+            .map((doc) => doc.id),
+      );
+
+    _allAttractions = attractionSnapshot.docs
         .map(AttractionModel.fromFirestore)
-        .where((attraction) {
-      return attraction.status.trim().toLowerCase() == 'active';
-    })
+        .where(_isAttractionAvailableForUser)
         .toList();
   }
 
@@ -492,13 +562,8 @@ class AiTripPlannerController extends ChangeNotifier {
   double _userPreferenceScoreForAttraction(
       AttractionModel attraction,
       ) {
-    final categoryIds = <String>{
-      ...attraction.categoryIds
-          .map((id) => id.trim())
-          .where((id) => id.isNotEmpty),
-      if (attraction.categoryId.trim().isNotEmpty)
-        attraction.categoryId.trim(),
-    };
+    final categoryIds =
+    _activeCategoryIdsForAttraction(attraction);
 
     if (categoryIds.isEmpty) {
       return 0;
@@ -510,8 +575,7 @@ class AiTripPlannerController extends ChangeNotifier {
       total += _userPreferenceScores[categoryId] ?? 0;
     }
 
-    // Averaging prevents attractions with many category tags from receiving
-    // an unfairly large personalization score solely because they have more tags.
+    // Only Active categories contribute to personalization.
     return total / categoryIds.length;
   }
 

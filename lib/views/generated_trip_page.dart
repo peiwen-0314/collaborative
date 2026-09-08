@@ -48,6 +48,10 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
 
   bool _hasRecordedGeneratedPreferences = false;
 
+  /// Current Active categories from Firestore.
+  /// Used so trip cards never display Inactive / Deleted categories.
+  final Map<String, String> _activeCategories = {};
+
   // Real transportation, computed automatically the moment this page
   // opens (see _computeTransport) using the same engine as the
   // transportation module's own "Plan Transportation" flow
@@ -88,9 +92,54 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadActiveCategories();
       _recordGeneratedTripPreferences();
       _computeTransport();
     });
+  }
+
+  Future<void> _loadActiveCategories() async {
+    try {
+      final snapshot =
+      await FirebaseFirestore.instance
+          .collection('categories')
+          .get();
+
+      final map = <String, String>{};
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+
+        final status =
+        (data['status'] ?? 'Active')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+        if (status != 'active') {
+          continue;
+        }
+
+        final name =
+        (data['name'] ?? '')
+            .toString()
+            .trim();
+
+        map[doc.id] = name;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _activeCategories
+          ..clear()
+          ..addAll(map);
+      });
+    } catch (e) {
+      debugPrint(
+        '[GeneratedTripPage] load active categories failed: $e',
+      );
+    }
   }
 
   Future<void> _recordGeneratedTripPreferences() async {
@@ -1357,15 +1406,37 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
   List<String> _categoryTags(
       AttractionModel attraction,
       ) {
-    final tags = <String>{
-      ...attraction.categoryNames
-          .map((value) => value.trim())
-          .where((value) => value.isNotEmpty),
-      if (attraction.categoryName.trim().isNotEmpty)
-        attraction.categoryName.trim(),
-    }.toList();
+    final ids = <String>[];
 
-    return tags.isEmpty ? <String>['Attraction'] : tags;
+    for (final id in attraction.categoryIds) {
+      final clean = id.trim();
+
+      if (clean.isNotEmpty && !ids.contains(clean)) {
+        ids.add(clean);
+      }
+    }
+
+    final primaryId = attraction.categoryId.trim();
+
+    if (primaryId.isNotEmpty && !ids.contains(primaryId)) {
+      ids.insert(0, primaryId);
+    }
+
+    final tags = <String>[];
+
+    for (final id in ids) {
+      final name = _activeCategories[id];
+
+      if (name != null &&
+          name.trim().isNotEmpty &&
+          !tags.contains(name.trim())) {
+        tags.add(name.trim());
+      }
+    }
+
+    return tags.isEmpty
+        ? <String>['Attraction']
+        : tags;
   }
 
   Widget _categoryChip(String value) {
@@ -1855,4 +1926,3 @@ TransportMode _dominantLegMode(RideOption option) {
   }
   return majority;
 }
-
