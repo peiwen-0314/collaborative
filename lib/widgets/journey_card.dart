@@ -17,6 +17,7 @@ class JourneyCard extends StatefulWidget {
     required this.onFromSelected,
     required this.onToSelected,
     required this.onSwap,
+    required this.onDetectLocation,
     this.fromPlaceholder = 'Detecting your location…',
   });
 
@@ -33,6 +34,12 @@ class JourneyCard extends StatefulWidget {
   final ValueChanged<LocationPoint> onToSelected;
 
   final VoidCallback onSwap;
+
+  /// Re-detects the device's current location and fills it into
+  /// "From" - shown as a small icon next to that row's search icon
+  /// (replaces the old standalone "Detect My Location" button below
+  /// this card).
+  final VoidCallback onDetectLocation;
 
   /// Shown in place of [from]'s name while it's null. Lets the caller
   /// distinguish "still detecting" from "detection failed, tap to pick".
@@ -271,6 +278,7 @@ class _JourneyCardState extends State<JourneyCard> {
                       _fromFocus.requestFocus();
                       _searchNow(_fromController.text, _ActiveField.from);
                     },
+                    onDetectLocation: widget.onDetectLocation,
                   ),
                   const Divider(height: 18, indent: 1, endIndent: 1),
                   _EditableLocationRow(
@@ -318,6 +326,7 @@ class _EditableLocationRow extends StatelessWidget {
     required this.hintText,
     required this.onChanged,
     required this.onSearchPressed,
+    this.onDetectLocation,
     this.outlined = false,
   });
 
@@ -329,6 +338,11 @@ class _EditableLocationRow extends StatelessWidget {
   final ValueChanged<String> onChanged;
 
   final VoidCallback onSearchPressed;
+
+  /// Null for rows that shouldn't offer it (the "To" row). When set,
+  /// shows a small "my location" icon next to the search icon.
+  final VoidCallback? onDetectLocation;
+
   final bool outlined;
 
   @override
@@ -375,19 +389,44 @@ class _EditableLocationRow extends StatelessWidget {
                 color: AppColors.muted,
                 fontWeight: FontWeight.w400,
               ),
-              suffixIconConstraints: const BoxConstraints(
-                minWidth: 26,
+              suffixIconConstraints: BoxConstraints(
+                minWidth: onDetectLocation == null ? 26 : 52,
                 minHeight: 20,
               ),
-              suffixIcon: GestureDetector(
-                onTap: onSearchPressed,
-                behavior: HitTestBehavior.opaque,
-                child: const Icon(
-                  Icons.search,
-                  size: 17,
-                  color: AppColors.green,
-                ),
-              ),
+              suffixIcon: onDetectLocation == null
+                  ? GestureDetector(
+                      onTap: onSearchPressed,
+                      behavior: HitTestBehavior.opaque,
+                      child: const Icon(
+                        Icons.search,
+                        size: 17,
+                        color: AppColors.green,
+                      ),
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        GestureDetector(
+                          onTap: onDetectLocation,
+                          behavior: HitTestBehavior.opaque,
+                          child: const Icon(
+                            Icons.my_location,
+                            size: 16,
+                            color: AppColors.green,
+                          ),
+                        ),
+                        const SizedBox(width: 9),
+                        GestureDetector(
+                          onTap: onSearchPressed,
+                          behavior: HitTestBehavior.opaque,
+                          child: const Icon(
+                            Icons.search,
+                            size: 17,
+                            color: AppColors.green,
+                          ),
+                        ),
+                      ],
+                    ),
             ),
           ),
         ),

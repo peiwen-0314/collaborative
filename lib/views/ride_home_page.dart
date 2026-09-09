@@ -497,32 +497,12 @@ class _TransportationPageState extends State<TransportationPage> {
                       onFromSelected: _handleFromSelected,
                       onToSelected: _handleToSelected,
                       onSwap: _swap,
+                      // Replaces the old standalone "Detect My Location"
+                      // button that used to sit below this card - now a
+                      // small icon next to the From row's search icon
+                      // instead (see JourneyCard/_EditableLocationRow).
+                      onDetectLocation: _retryDetectLocation,
                     ),
-                    if (_from == null) ...[
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: OutlinedButton.icon(
-                          onPressed: _retryDetectLocation,
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.green,
-                            side: const BorderSide(color: AppColors.green),
-                            minimumSize: const Size(0, 32),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(7),
-                            ),
-                          ),
-                          icon: const Icon(Icons.my_location, size: 15),
-                          label: const Text(
-                            'Detect My Location',
-                            style: TextStyle(fontSize: 11.5),
-                          ),
-                        ),
-                      ),
-                    ],
                     const SizedBox(height: 9),
                     Align(
                       alignment: Alignment.centerLeft,

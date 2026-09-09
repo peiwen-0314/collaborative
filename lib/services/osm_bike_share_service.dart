@@ -339,6 +339,8 @@ class OsmBikeShareService {
       String subtitle,
       double km, {
       String? encodedPolyline,
+      LocationPoint? startPoint,
+      LocationPoint? endPoint,
     }) {
       final speedKmh = mode == TransportMode.bike ? 15.0 : 4.5;
       final minutes = ((km / speedKmh) * 60).clamp(1, 999).round();
@@ -353,6 +355,8 @@ class OsmBikeShareService {
           end: end,
           isTransfer: false,
           distanceKm: km,
+          startPoint: startPoint,
+          endPoint: endPoint,
           encodedPolyline: encodedPolyline,
         ),
       );
@@ -372,6 +376,8 @@ class OsmBikeShareService {
         'Walk to ${pickupStation.name}',
         '⇄  Walk',
         walkToStationKm,
+        startPoint: from,
+        endPoint: pickupStation.point,
       );
     }
 
@@ -381,6 +387,8 @@ class OsmBikeShareService {
       '(${pickupStation.name} → ${dropoffStation.name})',
       bikeKm,
       encodedPolyline: bikeEncodedPolyline,
+      startPoint: pickupStation.point,
+      endPoint: dropoffStation.point,
     );
 
     if (lastMileHop != null) {
@@ -394,6 +402,8 @@ class OsmBikeShareService {
         'Walk to destination',
         '⇄  Walk',
         walkFromStationKm,
+        startPoint: dropoffStation.point,
+        endPoint: to,
       );
     }
 
