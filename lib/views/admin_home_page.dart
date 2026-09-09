@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'admin_login_page.dart';
 import 'admin_moderation_page.dart';
 import 'admin_sidebar.dart';
+import 'admin_stamp_management_page.dart';
+import 'admin_challenge_management_page.dart';
+import 'admin_reports_analytics_page.dart';
 
 class AdminHomePage extends StatelessWidget {
   const AdminHomePage({super.key});
@@ -72,14 +75,39 @@ class AdminHomePage extends StatelessWidget {
             // STAMP MANAGEMENT
             // ===================================================
             onStampTap: () {
-              // Later add navigation
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                  const AdminStampManagementPage(),
+                ),
+              );
+            },
+
+            // ===================================================
+            // CHALLENGES MANAGEMENT
+            // ===================================================
+            onChallengeTap: () {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                  const AdminChallengeManagementPage(),
+                ),
+              );
             },
 
             // ===================================================
             // REPORT
             // ===================================================
             onReportTap: () {
-              // Later add navigation
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                  const AdminReportsAnalyticsPage(),
+                ),
+              );
             },
 
             // ===================================================
@@ -254,9 +282,15 @@ class AdminHomePage extends StatelessWidget {
                             icon: Icons.card_giftcard_outlined,
                             title: 'Stamp Management',
                             description:
-                            'Manage travel stamps and rewards.',
+                            'Create and manage digital heritage stamp designs.',
                             onTap: () {
-                              // Later add navigation
+                              Navigator.pushReplacement(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                  const AdminStampManagementPage(),
+                                ),
+                              );
                             },
                           ),
 
@@ -265,11 +299,17 @@ class AdminHomePage extends StatelessWidget {
                           // =========================================
                           dashboardCard(
                             icon: Icons.analytics_outlined,
-                            title: 'Reports & Booking',
+                            title: 'Reports & Analytics',
                             description:
-                            'View booking information and reports.',
+                            'View visitor engagement and gamification performance.',
                             onTap: () {
-                              // Later add navigation
+                              Navigator.pushReplacement(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                  const AdminReportsAnalyticsPage(),
+                                ),
+                              );
                             },
                           ),
                         ],

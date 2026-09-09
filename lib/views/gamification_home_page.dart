@@ -360,7 +360,17 @@ class _GamificationHomePageState extends State<GamificationHomePage> {
           ),
         ),
       ),
-      _StatData(AppAssets.gameStamp, '${summary.collectedStamps}/${summary.totalStamps}', 'Stamp Completed', Icons.approval),
+      _StatData(
+        AppAssets.gameStamp,
+        '${summary.collectedStamps}/${summary.totalStamps}',
+        'Stamp Completed',
+        Icons.approval,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const DigitalPassportPage(),
+          ),
+        ),
+      ),
       _StatData(
         AppAssets.gameFlag,
         '${summary.completedChallenges}/${summary.totalChallenges}',
@@ -396,16 +406,23 @@ class _GamificationHomePageState extends State<GamificationHomePage> {
 
   String _treeAsset(double growth) {
     final safeGrowth = growth.clamp(0.0, 1.0);
+
     final index = safeGrowth >= 1
         ? AppAssets.treeStages.length - 1
         : (safeGrowth * AppAssets.treeStages.length).floor();
+
     return AppAssets.treeStages[index];
   }
 
   Widget _buildTreeCard(GamificationSummary summary) {
     return Container(
       height: 182,
-      padding: const EdgeInsets.fromLTRB(18, 15, 14, 12),
+      padding: const EdgeInsets.fromLTRB(
+        18,
+        15,
+        14,
+        12,
+      ),
       decoration: BoxDecoration(
         color: const Color(0xFFF5F7EB),
         borderRadius: BorderRadius.circular(10),
@@ -418,16 +435,31 @@ class _GamificationHomePageState extends State<GamificationHomePage> {
               child: SizedBox(
                 width: 210,
                 child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 700),
+                  duration: const Duration(
+                    milliseconds: 700,
+                  ),
                   switchInCurve: Curves.easeOutBack,
                   switchOutCurve: Curves.easeIn,
-                  transitionBuilder: (child, animation) => FadeTransition(
-                    opacity: animation,
-                    child: ScaleTransition(scale: animation, child: child),
-                  ),
+                  transitionBuilder: (
+                      child,
+                      animation,
+                      ) =>
+                      FadeTransition(
+                        opacity: animation,
+                        child: ScaleTransition(
+                          scale: animation,
+                          child: child,
+                        ),
+                      ),
                   child: Image.asset(
-                    _treeAsset(summary.treeGrowth),
-                    key: ValueKey(_treeAsset(summary.treeGrowth)),
+                    _treeAsset(
+                      summary.treeGrowth,
+                    ),
+                    key: ValueKey(
+                      _treeAsset(
+                        summary.treeGrowth,
+                      ),
+                    ),
                     fit: BoxFit.contain,
                   ),
                 ),
@@ -437,24 +469,51 @@ class _GamificationHomePageState extends State<GamificationHomePage> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Virtual Tree', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-              const Text('Your tree is growing!', style: TextStyle(fontSize: 13)),
+              const Text(
+                'Virtual Tree',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const Text(
+                'Your tree is growing!',
+                style: TextStyle(
+                  fontSize: 13,
+                ),
+              ),
               const Spacer(),
-              const Text('Growth', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              const Text(
+                'Growth',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               Text(
                 '${(summary.treeGrowth * 100).round()}%',
-                style: const TextStyle(fontSize: 27, height: 1.05, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  fontSize: 27,
+                  height: 1.05,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
               const SizedBox(height: 7),
               SizedBox(
                 width: 145,
                 child: ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: LinearProgressIndicator(
+                  borderRadius:
+                  BorderRadius.circular(20),
+                  child:
+                  LinearProgressIndicator(
                     minHeight: 10,
                     value: summary.treeGrowth,
-                    backgroundColor: const Color(0xFFD8DDDA),
-                    valueColor: const AlwaysStoppedAnimation(Color(0xFF507D36)),
+                    backgroundColor:
+                    const Color(0xFFD8DDDA),
+                    valueColor:
+                    const AlwaysStoppedAnimation(
+                      Color(0xFF507D36),
+                    ),
                   ),
                 ),
               ),

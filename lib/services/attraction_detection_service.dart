@@ -24,45 +24,63 @@ class AttractionDetectionService {
   final FirebaseAuth _auth;
   final FirebaseFirestore _firestore;
   final HeritageFirestoreService _heritageService;
+
   final Set<String> _processingAttractions = <String>{};
 
   Future<Stream<AttractionDetectionResult>> start() async {
     final user = _auth.currentUser;
-    if (user == null) return const Stream.empty();
+
+    if (user == null) {
+      return const Stream.empty();
+    }
 
     if (!await Geolocator.isLocationServiceEnabled()) {
-      throw StateError('Please turn on Location Services.');
+      throw StateError(
+        'Please turn on Location Services.',
+      );
     }
 
     var permission = await Geolocator.checkPermission();
+
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
+
     if (permission == LocationPermission.denied ||
         permission == LocationPermission.deniedForever) {
-      throw StateError('Location permission is required for auto-detection.');
+      throw StateError(
+        'Location permission is required for auto-detection.',
+      );
     }
 
-    final attractions = await _heritageService.getAttractions();
-    final controller = StreamController<AttractionDetectionResult>();
-    late final StreamSubscription<Position> positionSubscription;
+    final attractions =
+    await _heritageService.getAttractions();
 
-    positionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
-      ),
-    ).listen(
-          (position) => _checkPosition(
-        userId: user.uid,
-        position: position,
-        attractions: attractions,
-        controller: controller,
-      ),
-      onError: controller.addError,
-    );
+    final controller =
+    StreamController<AttractionDetectionResult>();
 
-    controller.onCancel = positionSubscription.cancel;
+    late final StreamSubscription<Position>
+    positionSubscription;
+
+    positionSubscription =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 10,
+          ),
+        ).listen(
+              (position) => _checkPosition(
+            userId: user.uid,
+            position: position,
+            attractions: attractions,
+            controller: controller,
+          ),
+          onError: controller.addError,
+        );
+
+    controller.onCancel =
+        positionSubscription.cancel;
+
     return controller.stream;
   }
 
@@ -70,12 +88,39 @@ class AttractionDetectionService {
     required String userId,
     required Position position,
     required List<HeritageAttraction> attractions,
-    required StreamController<AttractionDetectionResult> controller,
+    required StreamController<AttractionDetectionResult>
+    controller,
   }) async {
     for (final attraction in attractions) {
-      if (attraction.latitude == 0 || attraction.longitude == 0) continue;
+      // =======================================================
+      // SKIP INVALID LOCATION
+      // =======================================================
 
-      final distance = Geolocator.distanceBetween(
+      if (attraction.latitude == 0 ||
+          attraction.longitude == 0) {
+        continue;
+      }
+
+      // =======================================================
+      // IMPORTANT:
+      // NO STAMP IMAGE = NOT ELIGIBLE FOR STAMP COLLECTION
+      // =======================================================
+
+      if (attraction.stampImageUrl.trim().isEmpty) {
+        print(
+          'DETECTION SKIPPED: ${attraction.name} | '
+              'No stamp image configured.',
+        );
+
+        continue;
+      }
+
+      // =======================================================
+      // CALCULATE DISTANCE
+      // =======================================================
+
+      final distance =
+      Geolocator.distanceBetween(
         position.latitude,
         position.longitude,
         attraction.latitude,
@@ -87,18 +132,30 @@ class AttractionDetectionService {
             '${distance.toStringAsFixed(1)} metres',
       );
 
+      // =======================================================
+      // OUTSIDE DETECTION RANGE / ALREADY PROCESSING
+      // =======================================================
+
       if (distance > arrivalRadiusMetres ||
-          _processingAttractions.contains(attraction.id)) {
+          _processingAttractions.contains(
+            attraction.id,
+          )) {
         continue;
       }
 
-      _processingAttractions.add(attraction.id);
+      _processingAttractions.add(
+        attraction.id,
+      );
+
       try {
-        final collected = await _collectStamp(
+        final collected =
+        await _collectStamp(
           userId: userId,
           attraction: attraction,
         );
-        if (collected && !controller.isClosed) {
+
+        if (collected &&
+            !controller.isClosed) {
           controller.add(
             AttractionDetectionResult(
               attraction: attraction,
@@ -109,7 +166,9 @@ class AttractionDetectionService {
           );
         }
       } finally {
-        _processingAttractions.remove(attraction.id);
+        _processingAttractions.remove(
+          attraction.id,
+        );
       }
     }
   }
@@ -118,58 +177,185 @@ class AttractionDetectionService {
     required String userId,
     required HeritageAttraction attraction,
   }) async {
-    final summaryRef = _firestore.collection('gamification').doc(userId);
-    final stampsRef = summaryRef.collection('stamps');
-    final existingQuery = await stampsRef
-        .where('attractionId', isEqualTo: attraction.id)
+    // =========================================================
+    // SECOND SAFETY CHECK
+    // =========================================================
+    // Even if this method is called directly in future,
+    // attractions without a configured stamp image
+    // cannot be collected.
+    // =========================================================
+
+    if (attraction.stampImageUrl.trim().isEmpty) {
+      print(
+        'STAMP COLLECTION BLOCKED: '
+            '${attraction.name} has no stamp image.',
+      );
+
+      return false;
+    }
+
+    final summaryRef =
+    _firestore
+        .collection('gamification')
+        .doc(userId);
+
+    final stampsRef =
+    summaryRef.collection('stamps');
+
+    // =========================================================
+    // CHECK EXISTING STAMP
+    // =========================================================
+
+    final existingQuery =
+    await stampsRef
+        .where(
+      'attractionId',
+      isEqualTo: attraction.id,
+    )
         .limit(1)
         .get();
-    if (existingQuery.docs.isNotEmpty) return false;
 
-    final stampRef = stampsRef.doc(attraction.id);
+    if (existingQuery.docs.isNotEmpty) {
+      return false;
+    }
+
+    final stampRef =
+    stampsRef.doc(attraction.id);
+
     final pointTransactionRef =
-    summaryRef.collection('pointTransactions').doc();
+    summaryRef
+        .collection('pointTransactions')
+        .doc();
 
-    return _firestore.runTransaction((transaction) async {
-      final existingStamp = await transaction.get(stampRef);
-      if (existingStamp.exists) return false;
+    // =========================================================
+    // FIRESTORE TRANSACTION
+    // =========================================================
 
-      final summary = await transaction.get(summaryRef);
-      if (!summary.exists) {
-        throw StateError('Gamification record not found for this account.');
-      }
+    return _firestore.runTransaction(
+          (transaction) async {
+        final existingStamp =
+        await transaction.get(
+          stampRef,
+        );
 
-      final currentGrowth =
-          (summary.data()?['treeGrowth'] as num?)?.toDouble() ?? 0.0;
-      final updatedGrowth =
-      (currentGrowth + (xpReward / 1000)).clamp(0.0, 1.0).toDouble();
+        if (existingStamp.exists) {
+          return false;
+        }
 
-      transaction.set(stampRef, {
-        'attractionId': attraction.id,
-        'attractionName': attraction.name,
-        'imageName': '',
-        'stampImageUrl': attraction.stampImageUrl,
-        'imageUrl': attraction.imageUrl,
-        'collectedAt': FieldValue.serverTimestamp(),
-        'status': 'collected',
-        'detectedAutomatically': true,
-      });
+        final summary =
+        await transaction.get(
+          summaryRef,
+        );
 
-      transaction.update(summaryRef, {
-        'totalPoints': FieldValue.increment(pointsReward),
-        'currentXp': FieldValue.increment(xpReward),
-        'collectedStamps': FieldValue.increment(1),
-        'treeGrowth': updatedGrowth,
-      });
-      transaction.set(pointTransactionRef, {
-        'type': 'stamp',
-        'title': 'Heritage Stamp Collected',
-        'description': attraction.name,
-        'points': pointsReward,
-        'createdAt': FieldValue.serverTimestamp(),
-        'referenceId': attraction.id,
-      });
-      return true;
-    });
+        if (!summary.exists) {
+          throw StateError(
+            'Gamification record not found for this account.',
+          );
+        }
+
+        // =====================================================
+        // TREE GROWTH
+        // =====================================================
+        // Current logic kept unchanged for now.
+        // We will change this later for continuous tree growth.
+        // =====================================================
+
+        final currentGrowth =
+            (summary.data()?['treeGrowth'] as num?)
+                ?.toDouble() ??
+                0.0;
+
+        final currentTreeLevel =
+            (summary.data()?['treeLevel'] as num?)
+                ?.toInt() ??
+                1;
+
+        final addedGrowth =
+            xpReward / 1000;
+
+        final totalGrowth =
+            currentGrowth + addedGrowth;
+
+        final completedTrees =
+        totalGrowth.floor();
+
+        final updatedGrowth =
+            totalGrowth - completedTrees;
+
+        final updatedTreeLevel =
+            currentTreeLevel + completedTrees;
+
+        // =====================================================
+        // CREATE COLLECTED STAMP
+        // =====================================================
+
+        transaction.set(
+          stampRef,
+          {
+            'attractionId':
+            attraction.id,
+            'attractionName':
+            attraction.name,
+            'imageName': '',
+            'stampImageUrl':
+            attraction.stampImageUrl,
+            'imageUrl':
+            attraction.imageUrl,
+            'collectedAt':
+            FieldValue.serverTimestamp(),
+            'status': 'collected',
+            'detectedAutomatically':
+            true,
+          },
+        );
+
+        // =====================================================
+        // UPDATE GAMIFICATION SUMMARY
+        // =====================================================
+
+        transaction.update(
+          summaryRef,
+          {
+            'totalPoints':
+            FieldValue.increment(pointsReward),
+
+            'currentXp':
+            FieldValue.increment(xpReward),
+
+            'collectedStamps':
+            FieldValue.increment(1),
+
+            'treeGrowth':
+            updatedGrowth,
+
+            'treeLevel':
+            updatedTreeLevel,
+          },
+        );
+
+        // =====================================================
+        // POINT TRANSACTION
+        // =====================================================
+
+        transaction.set(
+          pointTransactionRef,
+          {
+            'type': 'stamp',
+            'title':
+            'Heritage Stamp Collected',
+            'description':
+            attraction.name,
+            'points':
+            pointsReward,
+            'createdAt':
+            FieldValue.serverTimestamp(),
+            'referenceId':
+            attraction.id,
+          },
+        );
+
+        return true;
+      },
+    );
   }
 }

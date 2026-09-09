@@ -136,6 +136,10 @@ class _AdminLoginPageState
           .trim()
           .toLowerCase();
 
+      debugPrint('LOGIN UID: ${user.uid}');
+      debugPrint('USER DATA: $data');
+      debugPrint('ROLE: $role');
+
       // ============================================================
       // 3. ADMIN ROLE CHECK
       // ============================================================

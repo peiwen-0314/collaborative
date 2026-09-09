@@ -79,7 +79,7 @@ class _DigitalPassportPageState extends State<DigitalPassportPage> {
                 child: Column(
                   children: [
                     _PassportProgressCard(summary: summary),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 22),
                     _RecentStampCard(stamps: recentStamps),
                     const SizedBox(height: 22),
                     _MalaysiaMapCard(stamps: stamps),
@@ -95,9 +95,7 @@ class _DigitalPassportPageState extends State<DigitalPassportPage> {
 }
 
 class _PassportProgressCard extends StatelessWidget {
-  const _PassportProgressCard({
-    required this.summary,
-  });
+  const _PassportProgressCard({required this.summary});
 
   final GamificationSummary summary;
 
@@ -111,6 +109,7 @@ class _PassportProgressCard extends StatelessWidget {
         .clamp(0.0, 1.0)
         .toDouble();
 
+<<<<<<< Updated upstream
     return SizedBox(
       width: double.infinity,
       child: ClipRRect(
@@ -237,6 +236,70 @@ class _PassportProgressCard extends StatelessWidget {
                 ),
               ),
             ),
+=======
+    return AspectRatio(
+      aspectRatio: 2.25,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(
+              'assets/images/digitalPassport.png',
+              fit: BoxFit.fill,
+              errorBuilder: (_, __, ___) => Container(
+                color: const Color(0xFFF4F2E8),
+                child: const Center(
+                  child: Icon(Icons.badge, size: 70, color: AppColors.green),
+                ),
+              ),
+            ),
+            Positioned(
+              left: MediaQuery.sizeOf(context).width * 0.52,
+              right: 22,
+              top: 42,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Passport Progress',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 13),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '${summary.collectedStamps}',
+                        style: const TextStyle(
+                          height: 0.95,
+                          fontSize: 37,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 3),
+                        child: Text(
+                          '/ ${summary.totalStamps}',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: LinearProgressIndicator(
+                      minHeight: 8,
+                      value: progress,
+                      backgroundColor: const Color(0xFFE0E0DC),
+                      valueColor: const AlwaysStoppedAnimation(Color(0xFF73944D)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+>>>>>>> Stashed changes
           ],
         ),
       ),

@@ -17,47 +17,132 @@ class PassportService {
   final FirebaseFirestore _firestore;
   final HeritageFirestoreService _heritageService;
 
-  Stream<List<PassportStamp>> watchRecentStamps({int limit = 3}) {
+  // ===========================================================
+  // RECENT STAMPS
+  // ===========================================================
+
+  Stream<List<PassportStamp>> watchRecentStamps({
+    int limit = 3,
+  }) {
     return _watchStamps(limit: limit);
   }
+
+  // ===========================================================
+  // ALL STAMPS
+  // ===========================================================
 
   Stream<List<PassportStamp>> watchAllStamps() {
     return _watchStamps();
   }
 
-  Stream<List<PassportStamp>> _watchStamps({int? limit}) {
+  // ===========================================================
+  // INTERNAL STAMP STREAM
+  // ===========================================================
+
+  Stream<List<PassportStamp>> _watchStamps({
+    int? limit,
+  }) {
     final user = _auth.currentUser;
+
     if (user == null) {
       return Stream.error(
-        StateError('Please sign in to view your digital passport.'),
+        StateError(
+          'Please sign in to view your digital passport.',
+        ),
       );
     }
 
-    Query<Map<String, dynamic>> query = _firestore
+    final query = _firestore
         .collection('gamification')
         .doc(user.uid)
         .collection('stamps')
-        .orderBy('collectedAt', descending: true);
-    if (limit != null) query = query.limit(limit);
+        .orderBy(
+      'collectedAt',
+      descending: true,
+    );
 
-    return query.snapshots()
-        .asyncMap((snapshot) async {
-      final stamps = snapshot.docs
-          .map(PassportStamp.fromFirestore)
-          .toList();
+    return query.snapshots().asyncMap(
+          (snapshot) async {
+        final collectedStamps = snapshot.docs
+            .map(PassportStamp.fromFirestore)
+            .toList();
 
-      return Future.wait(stamps.map((stamp) async {
-        if (stamp.attractionId.isEmpty) return stamp;
+        final validStamps = <PassportStamp>[];
 
-        final attraction = await _heritageService.getById(stamp.attractionId);
-        if (attraction == null) return stamp;
+        // =====================================================
+        // VALIDATE EACH COLLECTED STAMP
+        // =====================================================
 
-        return stamp.withAttraction(
-          name: attraction.name,
-          latitude: attraction.latitude,
-          longitude: attraction.longitude,
+        for (final stamp in collectedStamps) {
+          if (stamp.attractionId.trim().isEmpty) {
+            continue;
+          }
+
+          final attraction =
+          await _heritageService.getById(
+            stamp.attractionId,
+          );
+
+          // Attraction no longer exists
+          if (attraction == null) {
+            continue;
+          }
+
+          // ===================================================
+          // IMPORTANT
+          // ===================================================
+          // Only attractions that currently have a stamp image
+          // configured by Admin are considered valid stamps.
+          // ===================================================
+
+          if (attraction.stampImageUrl.trim().isEmpty) {
+            continue;
+          }
+
+          // ===================================================
+          // REFRESH STAMP WITH CURRENT MASTER DATA
+          // ===================================================
+
+          final updatedStamp = PassportStamp(
+            id: stamp.id,
+            attractionId: stamp.attractionId,
+            attractionName: attraction.name,
+            imageName: stamp.imageName,
+
+            // Always use latest Admin stamp image
+            stampImageUrl: attraction.stampImageUrl,
+
+            collectedAt: stamp.collectedAt,
+            status: stamp.status,
+            latitude: attraction.latitude,
+            longitude: attraction.longitude,
+          );
+
+          validStamps.add(updatedStamp);
+        }
+
+        // =====================================================
+        // SORT BY COLLECTION DATE
+        // =====================================================
+
+        validStamps.sort(
+              (a, b) =>
+              b.collectedAt.compareTo(
+                a.collectedAt,
+              ),
         );
-      }));
-    });
+
+        // =====================================================
+        // APPLY LIMIT AFTER FILTERING
+        // =====================================================
+
+        if (limit != null &&
+            validStamps.length > limit) {
+          return validStamps.take(limit).toList();
+        }
+
+        return validStamps;
+      },
+    );
   }
 }
