@@ -436,6 +436,142 @@ class AiTripPlannerController extends ChangeNotifier {
     }
   }
 
+
+  // ============================================================
+  // OPTIMIZE AN EXISTING SAVED TRIP
+  // ============================================================
+  //
+  // Important difference from generateTrip():
+  //
+  // generateTrip()
+  //   -> recommends attractions + schedules them.
+  //
+  // optimizeExistingAttractions()
+  //   -> DOES NOT recommend, add, remove or replace attractions.
+  //   -> only redistributes the user's CURRENT attractions across
+  //      the existing trip days and recalculates order + visit time.
+  //
+  // If all current attractions cannot fit within the selected dates
+  // and opening hours, this method returns false and the caller should
+  // keep the original saved plan unchanged.
+  //
+  Future<bool> optimizeExistingAttractions({
+    required List<AttractionModel> attractions,
+    required DateTime startDate,
+    required DateTime endDate,
+    required int adults,
+    required int children,
+    required int seniors,
+    required double budget,
+    required List<String> travelStyles,
+  }) async {
+    if (attractions.isEmpty) {
+      _errorMessage = 'There are no attractions to optimize.';
+      notifyListeners();
+      return false;
+    }
+
+    try {
+      _isLoading = true;
+      _errorMessage = null;
+      _generatedAttractions = [];
+      _generatedSchedule = [];
+      notifyListeners();
+
+      // Configure the planner with the saved trip's existing settings.
+      setDates(startDate, endDate);
+      setAdults(adults);
+      setChildren(children);
+      setSeniors(seniors);
+
+      // Budget is retained for cost calculation/reporting, but it is NOT
+      // used to remove a user's already-selected attraction during replan.
+      preferences.budget = budget;
+
+      preferences.travelStyles
+        ..clear()
+        ..addAll(
+          travelStyles
+              .map((style) => style.trim())
+              .where((style) => style.isNotEmpty),
+        );
+
+      await _ensureAttractionsLoaded();
+
+      // Always use the latest Firestore version of each saved attraction.
+      // This also guarantees that Inactive / Deleted attractions cannot be
+      // silently reintroduced into a newly optimized user-facing plan.
+      final availableById = <String, AttractionModel>{
+        for (final attraction in _allAttractions)
+          attraction.id: attraction,
+      };
+
+      final current = <AttractionModel>[];
+
+      for (final savedAttraction in attractions) {
+        final latest = availableById[savedAttraction.id];
+
+        if (latest == null) {
+          _errorMessage =
+          '${savedAttraction.name} is no longer available. '
+              'Please edit the trip before optimizing.';
+          return false;
+        }
+
+        current.add(latest);
+      }
+
+      final totalDays =
+      preferences.totalDays <= 0 ? 1 : preferences.totalDays;
+
+      // The exhaustive local sequence optimizer is intentionally limited
+      // to a practical search size. Normal plans are well below this.
+      final minimumStopsPerDay =
+      (current.length / totalDays).ceil();
+
+      if (minimumStopsPerDay > 8) {
+        _errorMessage =
+        'This trip has too many attractions to optimize safely '
+            'within $totalDays days. Please remove a few attractions '
+            'or extend the trip dates.';
+        return false;
+      }
+
+      await _buildExistingAttractionSchedule(current);
+
+      // Never partially overwrite a saved plan. The user's attraction set
+      // must stay exactly the same after optimization.
+      if (_generatedSchedule.length != current.length) {
+        _generatedAttractions = [];
+        _generatedSchedule = [];
+
+        _errorMessage =
+        'All selected attractions could not fit within the trip dates, '
+            'opening hours and visit durations. Your saved plan was not changed.';
+        return false;
+      }
+
+      _generatedAttractions = _generatedSchedule
+          .map((item) => item.attraction)
+          .toList();
+
+      return true;
+    } catch (e, stackTrace) {
+      debugPrint('Optimize existing trip error: $e');
+      debugPrint('$stackTrace');
+
+      _errorMessage =
+      'Unable to optimize this saved trip right now.';
+      _generatedAttractions = [];
+      _generatedSchedule = [];
+
+      return false;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> _ensureAttractionsLoaded() async {
     if (_allAttractions.isNotEmpty && _activeCategoryIds.isNotEmpty) {
       return;
@@ -721,6 +857,363 @@ class AiTripPlannerController extends ChangeNotifier {
     }
 
     return score.clamp(0, 10).toDouble();
+  }
+
+
+  // ============================================================
+  // SAVED-TRIP REPLANNING SCHEDULER
+  // ============================================================
+  //
+  // The attraction set is LOCKED:
+  // - no new attraction is recommended
+  // - no selected attraction is intentionally removed
+  //
+  // The optimizer may change:
+  // - day assignment
+  // - attraction order
+  // - start / end time
+  //
+  Future<void> _buildExistingAttractionSchedule(
+      List<AttractionModel> attractions,
+      ) async {
+    _generatedSchedule = [];
+    _routeCache.clear();
+
+    final remaining =
+    List<AttractionModel>.from(attractions);
+
+    final totalDays =
+    preferences.totalDays <= 0
+        ? 1
+        : preferences.totalDays;
+
+    for (int dayIndex = 0;
+    dayIndex < totalDays;
+    dayIndex++) {
+      if (remaining.isEmpty) {
+        break;
+      }
+
+      final daysRemaining =
+          totalDays - dayIndex;
+
+      // Spread the user's current attractions as evenly as possible.
+      // Example: 13 places / 4 days -> 4, 3, 3, 3.
+      final targetStops =
+      (remaining.length / daysRemaining).ceil();
+
+      final dayStart =
+      _dateForDay(
+        dayIndex,
+        9,
+        0,
+      );
+
+      final dayEnd =
+      _dateForDay(
+        dayIndex,
+        18,
+        0,
+      );
+
+      final dailyAttractions =
+      _existingAttractionShortlist(
+        remaining: remaining,
+        targetStops: targetStops,
+      );
+
+      final dailyCandidates = dailyAttractions
+          .map(
+            (attraction) => _ScoredAttraction(
+          attraction: attraction,
+
+          // Existing-attraction optimization does not need a
+          // recommendation score because the user's choices are locked.
+          score: 0,
+        ),
+      )
+          .toList();
+
+      if (dailyCandidates.isEmpty) {
+        continue;
+      }
+
+      HereMatrixResult? matrix;
+
+      final allHaveCoordinates =
+      dailyCandidates.every(
+            (candidate) =>
+            _hasCoordinates(
+              candidate.attraction,
+            ),
+      );
+
+      if (allHaveCoordinates &&
+          dailyCandidates.length >= 2) {
+        try {
+          matrix =
+          await _hereMatrixRoutingService
+              .calculateCarMatrix(
+            points: dailyCandidates
+                .map(
+                  (candidate) =>
+                  HereMatrixPoint(
+                    latitude:
+                    candidate.attraction.latitude,
+                    longitude:
+                    candidate.attraction.longitude,
+                  ),
+            )
+                .toList(),
+            departureTime: dayStart,
+          );
+        } catch (e) {
+          debugPrint(
+            'Saved trip HERE Matrix unavailable '
+                'for day ${dayIndex + 1}: $e',
+          );
+        }
+      }
+
+      final optimized =
+      _findBestDailySequence(
+        candidates: dailyCandidates,
+        matrix: matrix,
+        dayIndex: dayIndex,
+        dayStart: dayStart,
+        dayEnd: dayEnd,
+        usedBudgetBeforeDay: 0,
+
+        // Replanning must prioritize keeping the user's attractions.
+        maxStopsOverride: targetStops,
+        prioritizeStopCount: true,
+      );
+
+      if (optimized == null ||
+          optimized.candidateIndexes.isEmpty) {
+        continue;
+      }
+
+      DateTime currentTime = dayStart;
+      AttractionModel? previousAttraction;
+      bool lunchAdded = false;
+
+      final scheduledIds = <String>{};
+
+      for (final candidateIndex
+      in optimized.candidateIndexes) {
+        final selected =
+        dailyCandidates[candidateIndex];
+
+        final attraction =
+            selected.attraction;
+
+        HereRouteInfo? routeInfo;
+        bool usedHereRouting = false;
+
+        if (previousAttraction != null) {
+          final routeResult =
+          await _routeBetween(
+            from: previousAttraction,
+            to: attraction,
+            departureTime: currentTime,
+          );
+
+          routeInfo = routeResult.routeInfo;
+          usedHereRouting =
+              routeResult.usedHereRouting;
+
+          currentTime =
+              currentTime.add(
+                Duration(
+                  minutes:
+                  routeInfo.durationMinutes,
+                ),
+              );
+        }
+
+        if (!lunchAdded &&
+            currentTime.hour >= 12 &&
+            currentTime.hour < 14) {
+          currentTime =
+              currentTime.add(
+                const Duration(hours: 1),
+              );
+
+          lunchAdded = true;
+        }
+
+        final visitMinutes =
+        _recommendedVisitMinutes(
+          attraction,
+        );
+
+        final visitWindow =
+        _fitVisitIntoOpeningHours(
+          attraction: attraction,
+          dayIndex: dayIndex,
+          earliestArrival: currentTime,
+          visitMinutes: visitMinutes,
+          dayEnd: dayEnd,
+        );
+
+        if (visitWindow == null) {
+          continue;
+        }
+
+        final estimatedFee =
+        estimateAttractionFee(
+          attraction,
+        );
+
+        _generatedSchedule.add(
+          TripScheduleItem(
+            attraction: attraction,
+            dayIndex: dayIndex,
+            startTime: visitWindow.start,
+            endTime: visitWindow.end,
+            visitMinutes: visitMinutes,
+            transportMinutesBefore:
+            routeInfo?.durationMinutes ?? 0,
+            distanceFromPreviousKm:
+            routeInfo?.distanceKm ?? 0,
+            usedHereRouting:
+            previousAttraction == null
+                ? false
+                : usedHereRouting,
+            estimatedFee: estimatedFee,
+            recommendationScore: 0,
+          ),
+        );
+
+        scheduledIds.add(attraction.id);
+        previousAttraction = attraction;
+
+        currentTime =
+            visitWindow.end.add(
+              Duration(
+                minutes: _bufferMinutes(),
+              ),
+            );
+      }
+
+      remaining.removeWhere(
+            (attraction) =>
+            scheduledIds.contains(
+              attraction.id,
+            ),
+      );
+    }
+  }
+
+  /// Builds a geographically coherent shortlist for the current day.
+  ///
+  /// If there are <= 8 attractions left, use all of them.
+  /// Otherwise:
+  /// 1. treat every remaining attraction as a possible geographic anchor,
+  /// 2. find its nearest neighbours,
+  /// 3. choose the tightest cluster,
+  /// 4. send at most 8 places to HERE Matrix / permutation search.
+  List<AttractionModel> _existingAttractionShortlist({
+    required List<AttractionModel> remaining,
+    required int targetStops,
+  }) {
+    if (remaining.length <= 8) {
+      return List<AttractionModel>.from(
+        remaining,
+      );
+    }
+
+    AttractionModel? bestAnchor;
+    double bestClusterDistance =
+        double.infinity;
+
+    for (final anchor in remaining) {
+      if (!_hasCoordinates(anchor)) {
+        continue;
+      }
+
+      final distances = remaining
+          .where(
+            (item) =>
+        item.id != anchor.id &&
+            _hasCoordinates(item),
+      )
+          .map(
+            (item) => _distanceInKm(
+          anchor.latitude,
+          anchor.longitude,
+          item.latitude,
+          item.longitude,
+        ),
+      )
+          .toList()
+        ..sort();
+
+      final neighboursNeeded =
+      math.min(
+        math.max(targetStops - 1, 1),
+        distances.length,
+      );
+
+      final clusterDistance =
+      distances
+          .take(neighboursNeeded)
+          .fold<double>(
+        0,
+            (total, value) =>
+        total + value,
+      );
+
+      if (clusterDistance <
+          bestClusterDistance) {
+        bestClusterDistance =
+            clusterDistance;
+        bestAnchor = anchor;
+      }
+    }
+
+    // No usable coordinates: retain saved order as a safe fallback.
+    if (bestAnchor == null) {
+      return remaining.take(8).toList();
+    }
+
+    final anchor = bestAnchor;
+
+    final ordered = List<AttractionModel>.from(
+      remaining,
+    );
+
+    ordered.sort((a, b) {
+      if (a.id == anchor.id) return -1;
+      if (b.id == anchor.id) return 1;
+
+      final aDistance =
+      _hasCoordinates(a)
+          ? _distanceInKm(
+        anchor.latitude,
+        anchor.longitude,
+        a.latitude,
+        a.longitude,
+      )
+          : double.infinity;
+
+      final bDistance =
+      _hasCoordinates(b)
+          ? _distanceInKm(
+        anchor.latitude,
+        anchor.longitude,
+        b.latitude,
+        b.longitude,
+      )
+          : double.infinity;
+
+      return aDistance.compareTo(
+        bDistance,
+      );
+    });
+
+    return ordered.take(8).toList();
   }
 
   Future<void> _buildLogicalSchedule(
@@ -1101,6 +1594,8 @@ class AiTripPlannerController extends ChangeNotifier {
     required DateTime dayStart,
     required DateTime dayEnd,
     required double usedBudgetBeforeDay,
+    int? maxStopsOverride,
+    bool prioritizeStopCount = false,
   }) {
     if (candidates.isEmpty) {
       return null;
@@ -1108,7 +1603,8 @@ class AiTripPlannerController extends ChangeNotifier {
 
     final maxStops =
     math.min(
-      _maximumPlacesPerDay(),
+      maxStopsOverride ??
+          _maximumPlacesPerDay(),
       candidates.length,
     );
 
@@ -1140,14 +1636,31 @@ class AiTripPlannerController extends ChangeNotifier {
          * Every complete order is evaluated, so route order is not greedy.
          */
         final objective =
-            recommendationTotal +
-                (sequence.length * 12) -
-                (totalTravelMinutes * 0.22) -
-                (totalWaitingMinutes * 0.06);
+        prioritizeStopCount
+            ? // For a saved trip, the user has already chosen the
+        // attractions. First maximize how many can be kept
+        // today; then minimize travel / waiting time.
+        (sequence.length * 10000) -
+            (totalTravelMinutes * 0.22) -
+            (totalWaitingMinutes * 0.06)
+            : recommendationTotal +
+            (sequence.length * 12) -
+            (totalTravelMinutes * 0.22) -
+            (totalWaitingMinutes * 0.06);
 
-        if (best == null ||
-            objective >
-                best!.objective) {
+        final shouldReplace =
+            best == null ||
+                (prioritizeStopCount
+                    ? sequence.length >
+                    best!.candidateIndexes.length ||
+                    (sequence.length ==
+                        best!.candidateIndexes.length &&
+                        objective >
+                            best!.objective)
+                    : objective >
+                    best!.objective);
+
+        if (shouldReplace) {
           best =
               _OptimizedDaySequence(
                 candidateIndexes:
