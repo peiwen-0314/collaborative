@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -9,6 +10,12 @@ import '../models/user.dart';
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // Loaded from env.json when the app is started with:
+  // flutter run --dart-define-from-file=env.json
+  static const String _googleWebClientId = String.fromEnvironment(
+    'GOOGLE_WEB_CLIENT_ID',
+  );
 
   Future<void> _ensureGamificationProfile(User user) async {
     final gamificationRef =
@@ -83,61 +90,73 @@ class AuthService {
           .collection('users')
           .doc(firebaseUser.uid)
           .set(newUser.toMap());
+
       await _ensureGamificationProfile(firebaseUser);
     }
-
 
     return firebaseUser;
   }
 
   // ============================================================
   // GOOGLE SIGN IN
-  // google_sign_in 7.2.0
+  // google_sign_in 7.2.x
   // ============================================================
   Future<User?> signInWithGoogle() async {
-    final GoogleSignIn googleSignIn = GoogleSignIn.instance;
+    User? firebaseUser;
 
-    // Initialize Google Sign-In
-    await googleSignIn.initialize();
+    if (kIsWeb) {
+      final GoogleAuthProvider provider =
+      GoogleAuthProvider();
 
-    // Open Google account selector
-    final GoogleSignInAccount googleUser =
-    await googleSignIn.authenticate();
+      final UserCredential userCredential =
+      await _auth.signInWithPopup(provider);
 
-    // Get Google authentication information
-    final GoogleSignInAuthentication googleAuth =
-        googleUser.authentication;
+      firebaseUser =
+          userCredential.user;
+    } else {
+      final GoogleSignIn googleSignIn =
+          GoogleSignIn.instance;
 
-    // Create Firebase credential
-    final OAuthCredential credential =
-    GoogleAuthProvider.credential(
-      idToken: googleAuth.idToken,
-    );
+      await googleSignIn.initialize();
 
-    // Login to Firebase
-    final UserCredential userCredential =
-    await _auth.signInWithCredential(credential);
+      final GoogleSignInAccount googleUser =
+      await googleSignIn.authenticate();
 
-    final User? firebaseUser = userCredential.user;
+      final GoogleSignInAuthentication googleAuth =
+          googleUser.authentication;
 
-    // ==========================================================
-    // SAVE GOOGLE USER TO FIRESTORE
-    // ==========================================================
+      final OAuthCredential credential =
+      GoogleAuthProvider.credential(
+        idToken: googleAuth.idToken,
+      );
+
+      final UserCredential userCredential =
+      await _auth.signInWithCredential(
+        credential,
+      );
+
+      firebaseUser =
+          userCredential.user;
+    }
+
     if (firebaseUser != null) {
-      final DocumentReference<Map<String, dynamic>> userDocument =
+      final userDocument =
       _firestore
           .collection('users')
           .doc(firebaseUser.uid);
 
-      final DocumentSnapshot<Map<String, dynamic>> snapshot =
+      final snapshot =
       await userDocument.get();
 
-      // Only create document for new Google user
       if (!snapshot.exists) {
-        final UserModel newUser = UserModel(
+        final UserModel newUser =
+        UserModel(
           uid: firebaseUser.uid,
-          name: firebaseUser.displayName ?? 'User',
-          email: firebaseUser.email ?? '',
+          name:
+          firebaseUser.displayName ??
+              'User',
+          email:
+          firebaseUser.email ?? '',
         );
 
         await userDocument.set(
@@ -145,15 +164,17 @@ class AuthService {
         );
       }
 
-      await _ensureGamificationProfile(firebaseUser);
+      await _ensureGamificationProfile(
+        firebaseUser,
+      );
     }
 
     return firebaseUser;
   }
+
   // ============================================================
   // FORGET PASSWORD
   // ============================================================
-
   Future<void> sendPasswordResetEmail({
     required String email,
   }) async {
@@ -165,7 +186,6 @@ class AuthService {
   // ============================================================
   // ADMIN LOGIN
   // ============================================================
-
   Future<User?> loginAdmin({
     required String email,
     required String password,
@@ -207,19 +227,14 @@ class AuthService {
   // LOGOUT
   // ============================================================
   Future<void> logout() async {
-    final bool isGoogleUser = _auth.currentUser?.providerData.any(
-          (info) => info.providerId == 'google.com',
-    ) ??
-        false;
+    final bool isGoogleUser =
+        _auth.currentUser?.providerData.any(
+              (info) => info.providerId == 'google.com',
+        ) ??
+            false;
 
     await _auth.signOut();
 
-    // Only a Google-signed-in account ever initialize()'d GoogleSignIn
-    // in the first place (see signInWithGoogle()) - calling signOut()
-    // on it otherwise, especially on web, can hang for a long time
-    // instead of failing fast, which used to leave Logout looking
-    // stuck. The timeout is a second safety net even for a real
-    // Google account, so a flaky network can never block Logout.
     if (!isGoogleUser) return;
 
     try {
@@ -227,8 +242,7 @@ class AuthService {
         const Duration(seconds: 5),
       );
     } catch (_) {
-      // Firebase sign-out above already logged the person out of
-      // EcoTravel - a slow/broken Google sign-out shouldn't block that.
+      // Firebase sign-out already logged the user out of EcoTravel.
     }
   }
 
@@ -272,7 +286,8 @@ class AuthService {
       return 'No signed-in account found';
     }
 
-    final bool usesPasswordSignIn = user.providerData.any(
+    final bool usesPasswordSignIn =
+    user.providerData.any(
           (info) => info.providerId == 'password',
     );
 
@@ -285,15 +300,22 @@ class AuthService {
         email: email,
         password: currentPassword,
       );
-      await user.reauthenticateWithCredential(credential);
-      await user.updatePassword(newPassword);
+
+      await user.reauthenticateWithCredential(
+        credential,
+      );
+
+      await user.updatePassword(
+        newPassword,
+      );
 
       return null;
     } on FirebaseAuthException catch (e) {
       print('CHANGE PASSWORD ERROR CODE: ${e.code}');
       print('CHANGE PASSWORD ERROR MESSAGE: ${e.message}');
 
-      if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+      if (e.code == 'wrong-password' ||
+          e.code == 'invalid-credential') {
         return 'Current password is incorrect';
       }
 
@@ -318,16 +340,24 @@ class AuthService {
   // ============================================================
   Future<String> uploadProfilePicture(XFile image) async {
     final User? user = _auth.currentUser;
+
     if (user == null) {
-      throw StateError('Please log in to change your profile picture.');
+      throw StateError(
+        'Please log in to change your profile picture.',
+      );
     }
 
     final bytes = await image.readAsBytes();
-    final ref = FirebaseStorage.instance.ref('profile_pictures/${user.uid}');
+
+    final ref = FirebaseStorage.instance.ref(
+      'profile_pictures/${user.uid}',
+    );
 
     await ref.putData(
       bytes,
-      SettableMetadata(contentType: 'image/jpeg'),
+      SettableMetadata(
+        contentType: 'image/jpeg',
+      ),
     );
 
     return ref.getDownloadURL();
@@ -336,18 +366,28 @@ class AuthService {
   // ============================================================
   // UPDATE PROFILE (users/{uid} doc)
   // ============================================================
-  Future<void> updateProfile({String? name, String? photoUrl}) async {
+  Future<void> updateProfile({
+    String? name,
+    String? photoUrl,
+  }) async {
     final User? user = _auth.currentUser;
+
     if (user == null) {
-      throw StateError('Please log in to update your profile.');
+      throw StateError(
+        'Please log in to update your profile.',
+      );
     }
 
     final updates = <String, dynamic>{
       if (name != null) 'name': name,
       if (photoUrl != null) 'photoUrl': photoUrl,
     };
+
     if (updates.isEmpty) return;
 
-    await _firestore.collection('users').doc(user.uid).update(updates);
+    await _firestore
+        .collection('users')
+        .doc(user.uid)
+        .update(updates);
   }
 }

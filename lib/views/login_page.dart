@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../controllers/auth_controller.dart';
 import '../controllers/personalization_controller.dart';
+import 'forgot_password_page.dart';
 import 'home_page.dart';
 import 'interest_selection_page.dart';
 import 'register_page.dart';
@@ -343,7 +344,12 @@ class _LoginPageState extends State<LoginPage> {
                       alignment: Alignment.centerRight,
                       child: TextButton(
                         onPressed: () {
-                          // Later connect forgot password page
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ForgotPasswordPage(),
+                            ),
+                          );
                         },
                         child: Text(
                           'Forgot Password?',
