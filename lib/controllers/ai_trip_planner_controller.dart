@@ -653,6 +653,41 @@ class AiTripPlannerController extends ChangeNotifier {
         .toDouble();
   }
 
+  /// Returns true when this attraction should be treated as open 24 hours.
+  ///
+  /// Current database rule:
+  /// - closingTime == ""           -> 24 Hours
+  /// - closingTime == "24 Hours"   -> 24 Hours
+  /// - isOpen24Hours == true       -> 24 Hours
+  ///
+  /// A few equivalent text values are also accepted for compatibility.
+  bool _isOpen24Hours(
+      AttractionModel attraction,
+      ) {
+    final closingText =
+    attraction.closingTime
+        .trim()
+        .toLowerCase();
+
+    final openingText =
+    attraction.openingTime
+        .trim()
+        .toLowerCase();
+
+    return attraction.isOpen24Hours ||
+        closingText.isEmpty ||
+        closingText == '24 hours' ||
+        closingText == '24 hour' ||
+        closingText == 'open 24 hours' ||
+        closingText == '24hrs' ||
+        closingText == '24 hrs' ||
+        openingText == '24 hours' ||
+        openingText == '24 hour' ||
+        openingText == 'open 24 hours' ||
+        openingText == '24hrs' ||
+        openingText == '24 hrs';
+  }
+
   double _qualityScore(AttractionModel attraction) {
     double score = 0;
 
@@ -669,7 +704,7 @@ class AiTripPlannerController extends ChangeNotifier {
       score += 1.5;
     }
 
-    if (attraction.isOpen24Hours ||
+    if (_isOpen24Hours(attraction) ||
         attraction.openingHours.isNotEmpty ||
         (attraction.openingTime.trim().isNotEmpty &&
             attraction.closingTime.trim().isNotEmpty)) {
@@ -1496,7 +1531,9 @@ class AiTripPlannerController extends ChangeNotifier {
     final date =
     _dateForDay(dayIndex, 0, 0);
 
-    if (attraction.isOpen24Hours) {
+    // IMPORTANT DATABASE RULE:
+    // closingTime == "" or "24 Hours" means the attraction is open 24 hours.
+    if (_isOpen24Hours(attraction)) {
       return [
         _OpeningPeriod(
           start: DateTime(

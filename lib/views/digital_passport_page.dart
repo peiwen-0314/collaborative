@@ -103,106 +103,142 @@ class _PassportProgressCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final progress = summary.totalStamps <= 0
+    final double progress =
+    summary.totalStamps <= 0
         ? 0.0
-        : (summary.collectedStamps / summary.totalStamps)
+        : (summary.collectedStamps /
+        summary.totalStamps)
         .clamp(0.0, 1.0)
         .toDouble();
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: Stack(
-        children: [
-          // =====================================================
-          // PASSPORT BACKGROUND IMAGE
-          // Keep original image ratio - no stretching
-          // =====================================================
-          Transform.scale(
-            scale: 1.08,
-            child: Image.asset(
+    return SizedBox(
+      width: double.infinity,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Image.asset(
               'assets/images/digitalPassport.png',
               width: double.infinity,
               fit: BoxFit.fitWidth,
-              errorBuilder: (_, __, ___) => Container(
-                height: 170,
-                color: const Color(0xFFF4F2E8),
-                child: const Center(
-                  child: Icon(
-                    Icons.badge,
-                    size: 70,
-                    color: AppColors.green,
+              errorBuilder: (_, __, ___) {
+                return Container(
+                  height: 170,
+                  color: const Color(0xFFF4F2E8),
+                  child: const Center(
+                    child: Icon(
+                      Icons.badge,
+                      size: 70,
+                      color: AppColors.green,
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            Positioned.fill(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: FractionallySizedBox(
+                  widthFactor: 0.49,
+                  heightFactor: 0.82,
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                      left: 10,
+                      right: 14,
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.contain,
+                      alignment: Alignment.centerLeft,
+                      child: SizedBox(
+                        width: 165,
+                        height: 92,
+                        child: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Passport Progress',
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 13,
+                                height: 1,
+                                fontWeight:
+                                FontWeight.w700,
+                                color: Color(0xFF202020),
+                              ),
+                            ),
+
+                            const Spacer(),
+
+                            Row(
+                              crossAxisAlignment:
+                              CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  '${summary.collectedStamps}',
+                                  style: const TextStyle(
+                                    fontSize: 39,
+                                    height: 0.88,
+                                    fontWeight:
+                                    FontWeight.w800,
+                                    color: Color(0xFF111111),
+                                  ),
+                                ),
+
+                                const SizedBox(width: 4),
+
+                                Padding(
+                                  padding:
+                                  const EdgeInsets.only(
+                                    bottom: 3,
+                                  ),
+                                  child: Text(
+                                    '/ ${summary.totalStamps}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      height: 1,
+                                      fontWeight:
+                                      FontWeight.w700,
+                                      color: Color(0xFF111111),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const Spacer(),
+
+                            SizedBox(
+                              width: 125,
+                              child: ClipRRect(
+                                borderRadius:
+                                BorderRadius.circular(20),
+                                child:
+                                LinearProgressIndicator(
+                                  minHeight: 7,
+                                  value: progress,
+                                  backgroundColor:
+                                  const Color(0xFFE0E0DC),
+                                  valueColor:
+                                  const AlwaysStoppedAnimation<
+                                      Color>(
+                                    Color(0xFF73944D),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-
-          // =====================================================
-          // PASSPORT PROGRESS
-          // =====================================================
-          Positioned(
-            left: 185,
-            right: 22,
-            top: 42,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Passport Progress',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-
-                const SizedBox(height: 13),
-
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '${summary.collectedStamps}',
-                      style: const TextStyle(
-                        height: 0.95,
-                        fontSize: 37,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        bottom: 3,
-                      ),
-                      child: Text(
-                        '/ ${summary.totalStamps}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 8),
-
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: LinearProgressIndicator(
-                    minHeight: 8,
-                    value: progress,
-                    backgroundColor:
-                    const Color(0xFFE0E0DC),
-                    valueColor:
-                    const AlwaysStoppedAnimation(
-                      Color(0xFF73944D),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

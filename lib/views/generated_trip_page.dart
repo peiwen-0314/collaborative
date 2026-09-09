@@ -794,35 +794,36 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
       child: Column(
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
+                flex: 2,
                 child: _summaryBox(
-                  icon:
-                  Icons.calendar_today_outlined,
-                  value:
-                  '$totalDays Days',
-                  label:
-                  'Total Days',
+                  icon: Icons.calendar_today_outlined,
+                  value: '$totalDays Days',
+                  label: 'Total Days',
                 ),
               ),
+
               Expanded(
+                flex: 3,
                 child: _summaryBox(
-                  icon:
-                  Icons.account_balance_wallet_outlined,
+                  icon: Icons.account_balance_wallet_outlined,
                   value:
-                  'MYR ${_formatMoney(estimatedCost)} / ${_formatMoney(budget)}',
+                  'MYR ${_formatMoney(estimatedCost)}\n/ ${_formatMoney(budget)}',
                   label:
                   'Est. Total Cost (+ Transport) / Budget',
+                  allowTwoLines: true,
                 ),
               ),
+
               Expanded(
+                flex: 2,
                 child: _summaryBox(
-                  icon:
-                  Icons.location_on_outlined,
+                  icon: Icons.location_on_outlined,
                   value:
                   '$places ${places == 1 ? 'Place' : 'Places'}',
-                  label:
-                  'Total Attractions',
+                  label: 'Total Attractions',
                 ),
               ),
             ],
@@ -895,13 +896,23 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
     required IconData icon,
     required String value,
     required String label,
+    bool allowTwoLines = false,
   }) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 17, color: mainGreen),
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Icon(
+            icon,
+            size: 17,
+            color: mainGreen,
+          ),
+        ),
+
         const SizedBox(width: 6),
+
         Flexible(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -909,22 +920,26 @@ class _GeneratedTripPageState extends State<GeneratedTripPage> {
             children: [
               Text(
                 value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                maxLines: allowTwoLines ? 2 : 1,
+                overflow: TextOverflow.visible,
                 style: const TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                   color: Color(0xFF222222),
+                  height: 1.2,
                 ),
               ),
-              const SizedBox(height: 1),
+
+              const SizedBox(height: 2),
+
               Text(
                 label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+                overflow: TextOverflow.visible,
                 style: const TextStyle(
                   fontSize: 6.7,
                   color: Color(0xFF666666),
+                  height: 1.2,
                 ),
               ),
             ],
