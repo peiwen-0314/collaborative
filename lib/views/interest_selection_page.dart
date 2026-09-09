@@ -218,18 +218,20 @@ class _InterestSelectionPageState extends State<InterestSelectionPage> {
                 ),
               Center(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3),
-                  child: Text(
-                    category.name,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 11,
-                      height: 1.25,
-                      fontWeight:
-                      selected ? FontWeight.w700 : FontWeight.w600,
-                      color: selected ? mainGreen : textColor,
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.center,
+                    child: Text(
+                      category.name,
+                      maxLines: 1,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight:
+                        selected ? FontWeight.w700 : FontWeight.w600,
+                        color: selected ? mainGreen : textColor,
+                      ),
                     ),
                   ),
                 ),

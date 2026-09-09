@@ -931,8 +931,9 @@ class _HeritageCard extends StatelessWidget {
                         const SizedBox(width: 3),
 
                         Expanded(
-                          child: Text(
-                            'Opening Hours: ${attraction.openingHours}',
+                          child: Text( attraction.openingHours.trim().isEmpty
+                              ? 'Opening Hours: Available Anytime'
+                              : 'Opening Hours: ${attraction.openingHours}',
                             maxLines: 1,
                             overflow:
                             TextOverflow.ellipsis,

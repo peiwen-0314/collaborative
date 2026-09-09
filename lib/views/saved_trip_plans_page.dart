@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../controllers/ai_trip_planner_controller.dart';
 import '../controllers/transport_controller.dart';
 import '../core/formatters.dart';
 import '../models/attraction.dart';
@@ -631,6 +632,13 @@ class _SavedTripPlanDetailPageState
 
   int selectedDay = 0;
 
+  bool _optimizingTrip = false;
+
+  /// Current Active categories from Firestore.
+  /// Saved plans may contain old category names, so the UI verifies
+  /// category status before showing chips.
+  final Map<String, String> _activeCategories = {};
+
   final TransportController _transportController =
   TransportController();
   final LocationService _locationService = const LocationService();
@@ -646,7 +654,515 @@ class _SavedTripPlanDetailPageState
   @override
   void initState() {
     super.initState();
+    _loadActiveCategories();
     _loadTransportLegs();
+  }
+
+
+  DateTime? _savedDate(dynamic value) {
+    if (value is Timestamp) {
+      return value.toDate();
+    }
+
+    if (value is DateTime) {
+      return value;
+    }
+
+    if (value is String) {
+      return DateTime.tryParse(value);
+    }
+
+    return null;
+  }
+
+  List<String> _savedTravelStyles() {
+    final raw =
+    widget.data['travelStyles'];
+
+    if (raw is List) {
+      return raw
+          .map(
+            (value) =>
+            value.toString().trim(),
+      )
+          .where(
+            (value) => value.isNotEmpty,
+      )
+          .toList();
+    }
+
+    final legacy =
+    (widget.data['travelStyle'] ?? '')
+        .toString()
+        .trim();
+
+    return legacy.isEmpty
+        ? <String>[]
+        : <String>[legacy];
+  }
+
+  Future<void> _showOptimizeConfirmation() async {
+    if (_optimizingTrip) {
+      return;
+    }
+
+    final confirmed =
+    await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(
+                Icons.auto_fix_high_rounded,
+                color: mainGreen,
+                size: 22,
+              ),
+              SizedBox(width: 8),
+              Text(
+                'Optimize Trip?',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          content: const Text(
+            'Optimize this trip using your current attractions?\n\n'
+                'Your selected attractions will be kept. The system may '
+                'change their day, order and visit time to improve route '
+                'efficiency and fit opening hours.',
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.45,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () =>
+                  Navigator.pop(
+                    dialogContext,
+                    false,
+                  ),
+              child: const Text(
+                'Keep Current Plan',
+              ),
+            ),
+            ElevatedButton(
+              style:
+              ElevatedButton.styleFrom(
+                backgroundColor: mainGreen,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () =>
+                  Navigator.pop(
+                    dialogContext,
+                    true,
+                  ),
+              child: const Text(
+                'Optimize Trip',
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await _optimizeCurrentTrip();
+    }
+  }
+
+  Future<void> _optimizeCurrentTrip() async {
+    final rawAttractions =
+    SavedTripPlansPage._attractions(
+      widget.data,
+    );
+
+    if (rawAttractions.isEmpty) {
+      _showMessage(
+        'There are no attractions to optimize.',
+      );
+      return;
+    }
+
+    final startDate =
+    _savedDate(
+      widget.data['startDate'],
+    );
+
+    final endDate =
+    _savedDate(
+      widget.data['endDate'],
+    );
+
+    if (startDate == null ||
+        endDate == null) {
+      _showMessage(
+        'The saved trip dates are unavailable.',
+      );
+      return;
+    }
+
+    setState(() {
+      _optimizingTrip = true;
+    });
+
+    final planner =
+    AiTripPlannerController();
+
+    try {
+      // Load the CURRENT Firestore attraction records instead of trusting
+      // stale copies stored inside the saved plan.
+      final attractionIds =
+      rawAttractions
+          .map(
+            (item) =>
+            (item['id'] ?? '')
+                .toString()
+                .trim(),
+      )
+          .where(
+            (id) => id.isNotEmpty,
+      )
+          .toSet()
+          .toList();
+
+      if (attractionIds.length !=
+          rawAttractions.length) {
+        _showMessage(
+          'One or more saved attractions are missing their IDs.',
+        );
+        return;
+      }
+
+      final snapshots =
+      await Future.wait(
+        attractionIds.map(
+              (id) => FirebaseFirestore.instance
+              .collection('attractions')
+              .doc(id)
+              .get(),
+        ),
+      );
+
+      final liveAttractions =
+      <AttractionModel>[];
+
+      for (final snapshot in snapshots) {
+        if (!snapshot.exists) {
+          _showMessage(
+            'One of the saved attractions is no longer available.',
+          );
+          return;
+        }
+
+        liveAttractions.add(
+          AttractionModel.fromFirestore(
+            snapshot,
+          ),
+        );
+      }
+
+      final success =
+      await planner
+          .optimizeExistingAttractions(
+        attractions: liveAttractions,
+        startDate: startDate,
+        endDate: endDate,
+        adults:
+        (widget.data['adults'] as num?)
+            ?.toInt() ??
+            0,
+        children:
+        (widget.data['children'] as num?)
+            ?.toInt() ??
+            0,
+        seniors:
+        (widget.data['seniors'] as num?)
+            ?.toInt() ??
+            0,
+        budget:
+        (widget.data['budget'] as num?)
+            ?.toDouble() ??
+            0,
+        travelStyles:
+        _savedTravelStyles(),
+      );
+
+      if (!success) {
+        _showMessage(
+          planner.errorMessage ??
+              'Unable to optimize this trip.',
+        );
+        return;
+      }
+
+      final originalById =
+      <String, Map<String, dynamic>>{
+        for (final item in rawAttractions)
+          (item['id'] ?? '')
+              .toString()
+              .trim():
+          item,
+      };
+
+      final updatedAttractions =
+      <Map<String, dynamic>>[];
+
+      for (final scheduleItem
+      in planner.generatedSchedule) {
+        final attraction =
+            scheduleItem.attraction;
+
+        final original =
+        originalById[attraction.id];
+
+        if (original == null) {
+          continue;
+        }
+
+        updatedAttractions.add({
+          ...original,
+
+          // Keep the user's exact attraction, but replace schedule fields.
+          'day':
+          scheduleItem.dayIndex + 1,
+          'startTime':
+          Timestamp.fromDate(
+            scheduleItem.startTime,
+          ),
+          'endTime':
+          Timestamp.fromDate(
+            scheduleItem.endTime,
+          ),
+          'visitMinutes':
+          scheduleItem.visitMinutes,
+          'transportMinutesBefore':
+          scheduleItem
+              .transportMinutesBefore,
+          'distanceFromPreviousKm':
+          scheduleItem
+              .distanceFromPreviousKm,
+          'usedHereRouting':
+          scheduleItem.usedHereRouting,
+          'estimatedFee':
+          scheduleItem.estimatedFee,
+        });
+      }
+
+      updatedAttractions.sort(
+            (a, b) {
+          final dayA =
+              (a['day'] as num?)
+                  ?.toInt() ??
+                  1;
+
+          final dayB =
+              (b['day'] as num?)
+                  ?.toInt() ??
+                  1;
+
+          if (dayA != dayB) {
+            return dayA.compareTo(dayB);
+          }
+
+          final startA =
+              _savedDate(
+                a['startTime'],
+              ) ??
+                  DateTime(2999);
+
+          final startB =
+              _savedDate(
+                b['startTime'],
+              ) ??
+                  DateTime(2999);
+
+          return startA.compareTo(
+            startB,
+          );
+        },
+      );
+
+      if (updatedAttractions.length !=
+          rawAttractions.length) {
+        _showMessage(
+          'The optimized plan did not contain every selected attraction, '
+              'so your saved plan was left unchanged.',
+        );
+        return;
+      }
+
+      final estimatedAttractionCost =
+      planner.generatedSchedule
+          .fold<double>(
+        0,
+            (total, item) =>
+        total + item.estimatedFee,
+      );
+
+      final planRef =
+      FirebaseFirestore.instance
+          .collection(
+        'saved_trip_plans',
+      )
+          .doc(widget.planId);
+
+      await planRef.update({
+        'attractions':
+        updatedAttractions,
+        'totalAttractions':
+        updatedAttractions.length,
+        'estimatedAttractionCost':
+        estimatedAttractionCost,
+        'optimizedAt':
+        FieldValue.serverTimestamp(),
+        'lastModifiedAt':
+        FieldValue.serverTimestamp(),
+      });
+
+      // Existing transport legs are now stale because day/order/time changed.
+      // Delete them. The refreshed detail page will automatically rebuild
+      // transportation using the existing TransportController flow.
+      await _transportController
+          .deleteTransportPlan(
+        widget.planId,
+      );
+
+      final refreshed =
+      await planRef.get();
+
+      if (!mounted) return;
+
+      final refreshedData =
+      refreshed.data();
+
+      if (refreshedData == null) {
+        _showMessage(
+          'Trip optimized, but the refreshed plan could not be loaded.',
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            backgroundColor: mainGreen,
+            content: Text(
+              'Trip optimized using your current attractions.',
+            ),
+          ),
+        );
+
+      // Replace this detail route so every visible day/timeline field uses
+      // the newly saved Firestore data immediately.
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) =>
+              SavedTripPlanDetailPage(
+                planId: widget.planId,
+                data: refreshedData,
+              ),
+        ),
+      );
+    } catch (e, stackTrace) {
+      debugPrint(
+        'Optimize saved trip error: $e',
+      );
+      debugPrint('$stackTrace');
+
+      if (!mounted) return;
+
+      _showMessage(
+        'Unable to optimize this trip right now.',
+      );
+    } finally {
+      planner.dispose();
+
+      if (mounted) {
+        setState(() {
+          _optimizingTrip = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _refreshAfterEdit() async {
+    final snapshot =
+    await FirebaseFirestore.instance
+        .collection(
+      'saved_trip_plans',
+    )
+        .doc(widget.planId)
+        .get();
+
+    if (!mounted ||
+        !snapshot.exists) {
+      return;
+    }
+
+    final data = snapshot.data();
+
+    if (data == null) {
+      return;
+    }
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) =>
+            SavedTripPlanDetailPage(
+              planId: widget.planId,
+              data: data,
+            ),
+      ),
+    );
+  }
+
+  Future<void> _loadActiveCategories() async {
+    try {
+      final snapshot =
+      await FirebaseFirestore.instance
+          .collection('categories')
+          .get();
+
+      final map = <String, String>{};
+
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+
+        final status =
+        (data['status'] ?? 'Active')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+        if (status != 'active') {
+          continue;
+        }
+
+        final name =
+        (data['name'] ?? '')
+            .toString()
+            .trim();
+
+        map[doc.id] = name;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _activeCategories
+          ..clear()
+          ..addAll(map);
+      });
+    } catch (e) {
+      debugPrint(
+        '[SavedTripPlanDetailPage] load active categories failed: $e',
+      );
+    }
   }
 
   Future<void> _loadTransportLegs() async {
@@ -814,12 +1330,12 @@ class _SavedTripPlanDetailPageState
     );
     final openingAt = attraction?.openingDateTime(dayDate);
     final newVisitStart =
-        (openingAt != null && option.arriveTime.isBefore(openingAt))
+    (openingAt != null && option.arriveTime.isBefore(openingAt))
         ? openingAt
         : option.arriveTime;
     final visitMinutes =
         attraction?.recommendedVisitMinutes ??
-        leg.visitEnd.difference(leg.visitStart).inMinutes;
+            leg.visitEnd.difference(leg.visitStart).inMinutes;
     final newVisitEnd = newVisitStart.add(Duration(minutes: visitMinutes));
 
     // Editing this leg's transport can move its arrival time - shift
@@ -990,16 +1506,24 @@ class _SavedTripPlanDetailPageState
         ),
         actions: [
           TextButton.icon(
-            onPressed: () {
-              Navigator.push(
+            onPressed: _optimizingTrip
+                ? null
+                : () async {
+              await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => EditSavedTripPlanPage(
-                    planId: widget.planId,
-                    initialData: widget.data,
-                  ),
+                  builder: (_) =>
+                      EditSavedTripPlanPage(
+                        planId: widget.planId,
+                        initialData:
+                        widget.data,
+                      ),
                 ),
               );
+
+              if (!mounted) return;
+
+              await _refreshAfterEdit();
             },
             icon: const Icon(
               Icons.edit_outlined,
@@ -1032,6 +1556,72 @@ class _SavedTripPlanDetailPageState
             CrossAxisAlignment.start,
             children: [
               _summary(),
+
+              const SizedBox(height: 10),
+
+              SizedBox(
+                width: double.infinity,
+                height: 42,
+                child: OutlinedButton.icon(
+                  onPressed:
+                  _optimizingTrip
+                      ? null
+                      : _showOptimizeConfirmation,
+                  style:
+                  OutlinedButton.styleFrom(
+                    foregroundColor: mainGreen,
+                    side: const BorderSide(
+                      color: mainGreen,
+                    ),
+                    shape:
+                    RoundedRectangleBorder(
+                      borderRadius:
+                      BorderRadius.circular(
+                        10,
+                      ),
+                    ),
+                  ),
+                  icon: _optimizingTrip
+                      ? const SizedBox(
+                    width: 15,
+                    height: 15,
+                    child:
+                    CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: mainGreen,
+                    ),
+                  )
+                      : const Icon(
+                    Icons
+                        .auto_fix_high_rounded,
+                    size: 17,
+                  ),
+                  label: Text(
+                    _optimizingTrip
+                        ? 'Optimizing Trip...'
+                        : 'Optimize Trip',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight:
+                      FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+
+              if (_optimizingTrip) ...[
+                const SizedBox(height: 7),
+                const Text(
+                  'Keeping your current attractions while recalculating '
+                      'their day, order, opening-hour fit and route efficiency.',
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    color: secondaryText,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+
               if (_computingTransport) ...[
                 const SizedBox(height: 10),
                 Container(
@@ -1838,34 +2428,44 @@ class _SavedTripPlanDetailPageState
   List<String> _categoryTags(
       Map<String, dynamic> attraction,
       ) {
-    final result = <String>{};
+    final ids = <String>[];
 
-    final raw =
-    attraction['categoryNames'];
+    final rawIds = attraction['categoryIds'];
 
-    if (raw is List) {
-      for (final item in raw) {
-        final value =
-        item.toString().trim();
+    if (rawIds is List) {
+      for (final item in rawIds) {
+        final id = item.toString().trim();
 
-        if (value.isNotEmpty) {
-          result.add(value);
+        if (id.isNotEmpty && !ids.contains(id)) {
+          ids.add(id);
         }
       }
     }
 
-    final primary =
-    (attraction['categoryName'] ?? '')
+    final primaryId =
+    (attraction['categoryId'] ?? '')
         .toString()
         .trim();
 
-    if (primary.isNotEmpty) {
-      result.add(primary);
+    if (primaryId.isNotEmpty && !ids.contains(primaryId)) {
+      ids.insert(0, primaryId);
+    }
+
+    final result = <String>[];
+
+    for (final id in ids) {
+      final name = _activeCategories[id];
+
+      if (name != null &&
+          name.trim().isNotEmpty &&
+          !result.contains(name.trim())) {
+        result.add(name.trim());
+      }
     }
 
     return result.isEmpty
-        ? ['Attraction']
-        : result.toList();
+        ? <String>['Attraction']
+        : result;
   }
 
   Widget _categoryChip(

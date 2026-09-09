@@ -171,14 +171,19 @@ class CategoryController extends ChangeNotifier {
           .get();
 
       _categories =
-          snapshot.docs.map(
+          snapshot.docs
+              .map(
                 (document) {
-              return CategoryModel
-                  .fromFirestore(
+              return CategoryModel.fromFirestore(
                 document,
               );
             },
-          ).toList();
+          )
+              .where(
+                (category) =>
+            category.status.trim().toLowerCase() != 'deleted',
+          )
+              .toList();
 
       // Prevent invalid page number
       if (_currentPage > totalPages) {
@@ -275,41 +280,36 @@ class CategoryController extends ChangeNotifier {
       _isOperationLoading = true;
       notifyListeners();
 
-      final trimmedName =
-      name.trim();
+      final trimmedName = name.trim();
 
-      final duplicate =
-      _categories.any(
+      final duplicate = _categories.any(
             (category) =>
         category.id != id &&
-            category.name
-                .toLowerCase() ==
-                trimmedName
-                    .toLowerCase(),
+            category.name.toLowerCase() == trimmedName.toLowerCase(),
       );
 
       if (duplicate) {
         return false;
       }
 
-      await _firestore
-          .collection('categories')
-          .doc(id)
-          .update({
+      await _firestore.collection('categories').doc(id).update({
         'name': trimmedName,
-        'description':
-        description.trim(),
+        'description': description.trim(),
         'status': status,
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      await loadCategories();
+      // If an admin changes a category to Inactive, user-facing features
+      // must stop using it. Attractions with no other Active category
+      // automatically become Inactive.
+      if (status.trim().toLowerCase() == 'inactive') {
+        await _syncAttractionsAfterCategoryUnavailable(id);
+      }
 
+      await loadCategories();
       return true;
     } catch (e) {
-      debugPrint(
-        'Update category error: $e',
-      );
-
+      debugPrint('Update category error: $e');
       return false;
     } finally {
       _isOperationLoading = false;
@@ -318,9 +318,16 @@ class CategoryController extends ChangeNotifier {
   }
 
   // ============================================================
-  // DELETE CATEGORY
+  // DELETE CATEGORY (SOFT DELETE)
   // ============================================================
-
+  //
+  // Delete does NOT physically remove the Firestore document.
+  // It changes status to Deleted:
+  // - Admin Category Management no longer displays it.
+  // - Users never see/use it.
+  // - AI planning/recommendations never use it.
+  // - Attractions with no other Active category become Inactive.
+  //
   Future<bool> deleteCategory(
       String id,
       ) async {
@@ -328,23 +335,101 @@ class CategoryController extends ChangeNotifier {
       _isOperationLoading = true;
       notifyListeners();
 
-      await _firestore
-          .collection('categories')
-          .doc(id)
-          .delete();
+      await _firestore.collection('categories').doc(id).update({
+        'status': 'Deleted',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
 
+      await _syncAttractionsAfterCategoryUnavailable(id);
       await loadCategories();
 
       return true;
     } catch (e) {
-      debugPrint(
-        'Delete category error: $e',
-      );
-
+      debugPrint('Delete category error: $e');
       return false;
     } finally {
       _isOperationLoading = false;
       notifyListeners();
+    }
+  }
+
+  // ============================================================
+  // CATEGORY -> ATTRACTION STATUS SYNCHRONIZATION
+  // ============================================================
+  //
+  // Category IDs are intentionally kept inside attraction documents.
+  // The category status is the source of truth.
+  //
+  // Example:
+  // Attraction = [Culture, Nature, Food]
+  // Food -> Inactive/Deleted
+  // Attraction remains Active because Culture/Nature are Active.
+  //
+  // Attraction = [Food]
+  // Food -> Inactive/Deleted
+  // Attraction automatically becomes Inactive.
+  //
+  Future<void> _syncAttractionsAfterCategoryUnavailable(
+      String categoryId,
+      ) async {
+    final categorySnapshot =
+    await _firestore.collection('categories').get();
+
+    final activeCategoryIds = categorySnapshot.docs
+        .where((doc) {
+      final status =
+      (doc.data()['status'] ?? 'Active').toString().trim().toLowerCase();
+      return status == 'active';
+    })
+        .map((doc) => doc.id)
+        .toSet();
+
+    final attractionSnapshot =
+    await _firestore.collection('attractions').get();
+
+    final batch = _firestore.batch();
+    var hasUpdates = false;
+
+    for (final attractionDoc in attractionSnapshot.docs) {
+      final data = attractionDoc.data();
+
+      // Ignore attractions that were already deleted.
+      final attractionStatus =
+      (data['status'] ?? 'Active').toString().trim().toLowerCase();
+
+      if (attractionStatus == 'deleted') {
+        continue;
+      }
+
+      final categoryIds = <String>{
+        ...((data['categoryIds'] as List?) ?? const [])
+            .map((item) => item.toString().trim())
+            .where((id) => id.isNotEmpty),
+        if ((data['categoryId'] ?? '').toString().trim().isNotEmpty)
+          (data['categoryId'] ?? '').toString().trim(),
+      };
+
+      if (!categoryIds.contains(categoryId)) {
+        continue;
+      }
+
+      final hasAnyActiveCategory =
+      categoryIds.any(activeCategoryIds.contains);
+
+      if (!hasAnyActiveCategory && attractionStatus == 'active') {
+        batch.update(
+          attractionDoc.reference,
+          {
+            'status': 'Inactive',
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+        );
+        hasUpdates = true;
+      }
+    }
+
+    if (hasUpdates) {
+      await batch.commit();
     }
   }
 

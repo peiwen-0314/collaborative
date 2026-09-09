@@ -43,7 +43,15 @@ class AttractionController extends ChangeNotifier {
   String? _lastSavedAttractionId;
 
   List<AttractionModel> get attractions => _attractions;
-  List<CategoryModel> get categories => _categories;
+  // Admin filter: Active + Inactive, excluding Deleted.
+  List<CategoryModel> get categories => _categories
+      .where((category) => category.status.trim().toLowerCase() != 'deleted')
+      .toList();
+
+  // Add/Edit forms: Active categories only.
+  List<CategoryModel> get activeCategories => _categories
+      .where((category) => category.status.trim().toLowerCase() == 'active')
+      .toList();
   bool get isLoading => _isLoading;
   bool get isProcessing => _isProcessing;
   String get searchQuery => _searchQuery;
@@ -176,14 +184,26 @@ class AttractionController extends ChangeNotifier {
     try {
       final snapshot = await _firestore.collection('categories').get();
 
+      // Keep Active + Inactive for admin filtering.
+      // Deleted categories are hidden completely.
       _categories = snapshot.docs
           .map(CategoryModel.fromFirestore)
-          .where((category) => category.status == 'Active')
+          .where(
+            (category) =>
+        category.status.trim().toLowerCase() != 'deleted',
+      )
           .toList();
 
       _categories.sort(
             (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
       );
+
+      // Reset the admin filter if its selected category was deleted.
+      if (_selectedCategory != 'All Categories' &&
+          !_categories.any((category) => category.id == _selectedCategory)) {
+        _selectedCategory = 'All Categories';
+        _currentPage = 1;
+      }
 
       if (notify) notifyListeners();
     } catch (e) {
@@ -195,8 +215,13 @@ class AttractionController extends ChangeNotifier {
     try {
       final snapshot = await _firestore.collection('attractions').get();
 
-      _attractions =
-          snapshot.docs.map(AttractionModel.fromFirestore).toList();
+      _attractions = snapshot.docs
+          .map(AttractionModel.fromFirestore)
+          .where(
+            (attraction) =>
+        attraction.status.trim().toLowerCase() != 'deleted',
+      )
+          .toList();
 
       _attractions.sort(
             (a, b) => b.createdAt.compareTo(a.createdAt),
@@ -883,28 +908,32 @@ class AttractionController extends ChangeNotifier {
 
       final batch = _firestore.batch();
 
-      batch.delete(
+      // Soft delete only. Keep the attraction document and its images
+      // for data integrity/recovery, but hide it everywhere.
+      batch.update(
         _firestore.collection('attractions').doc(attractionId),
+        {
+          'status': 'Deleted',
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
       );
 
+      // A Deleted attraction is no longer counted as an available
+      // attraction under its categories.
       for (final categoryId in categoryIds) {
         batch.update(
           _firestore.collection('categories').doc(categoryId),
-          {'attractionCount': FieldValue.increment(-1)},
+          {
+            'attractionCount': FieldValue.increment(-1),
+          },
         );
       }
 
       await batch.commit();
 
-      for (final url in attraction.imageUrls) {
-        if (url.trim().isEmpty) continue;
-
-        try {
-          await _storage.refFromURL(url).delete();
-        } catch (e) {
-          debugPrint('Image delete error: $e');
-        }
-      }
+      // IMPORTANT:
+      // Do not delete Firebase Storage images here.
+      // The Firestore record is intentionally retained as Deleted.
 
       await loadAttractions(notify: false);
 
@@ -917,4 +946,5 @@ class AttractionController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
 }
