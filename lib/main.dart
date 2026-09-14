@@ -44,8 +44,8 @@ class MyApp extends StatelessWidget {
         );
       },
 
-      home: const LoginPage(),
-      // home: const AdminLoginPage(),
+      // home: const LoginPage(),
+      home: const AdminLoginPage(),
     );
   }
 }
