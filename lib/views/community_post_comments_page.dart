@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/community_post.dart';
 import '../services/community_feed_service.dart';
 import '../services/review_moderation_service.dart';
+import '../widgets/submission_success_dialog.dart';
 
 /// Comment thread for a [CommunityPost]. Uses the same API content
 /// moderation service as attraction reviews before saving comments.
@@ -81,6 +82,12 @@ class _CommunityPostCommentsPageState extends State<CommunityPostCommentsPage> {
         _submittingComment = false;
         _errorText = null;
       });
+
+      await showSubmissionSuccessDialog(
+        context,
+        title: 'Comment added',
+        message: 'Your comment was added to the community post successfully.',
+      );
     } catch (error) {
       if (!mounted) return;
 

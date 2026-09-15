@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../services/community_feed_service.dart';
 import '../services/review_moderation_service.dart';
+import '../widgets/submission_success_dialog.dart';
 
 /// Form for creating a new community post. Runs the same
 /// API moderation used by attraction reviews before saving.
@@ -124,7 +125,12 @@ class _WriteCommunityPostPageState extends State<WriteCommunityPostPage> {
       if (!mounted) return;
 
       setState(() => _submitting = false);
-      _showResultDialog(success: true);
+      await showSubmissionSuccessDialog(
+        context,
+        title: 'Post published',
+        message: 'Your community post was added successfully.',
+      );
+      if (mounted) Navigator.pop(context, true);
     } catch (error) {
       if (!mounted) return;
 
@@ -148,14 +154,6 @@ class _WriteCommunityPostPageState extends State<WriteCommunityPostPage> {
     showDialog<void>(
       context: context,
       builder: (dialogContext) {
-        if (success) {
-          Future.delayed(const Duration(milliseconds: 900), () {
-            if (Navigator.canPop(dialogContext)) {
-              Navigator.pop(dialogContext);
-            }
-            if (mounted) Navigator.pop(context);
-          });
-        }
         return Dialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           child: Container(
