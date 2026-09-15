@@ -24,6 +24,7 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
   final TextEditingController _searchController = TextEditingController();
   String _typeFilter = 'All content';
   String _statusFilter = 'All statuses';
+  String _sortOrder = 'Newest first';
 
   @override
   void initState() {
@@ -46,7 +47,7 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
 
   List<AdminModerationItem> get _filteredItems {
     final query = _searchController.text.trim().toLowerCase();
-    return _service.items.where((item) {
+    final items = _service.items.where((item) {
       final matchesType = _typeFilter == 'All content' ||
           (_typeFilter == 'Community posts' &&
               item.type == ModerationContentType.communityPost) ||
@@ -60,6 +61,69 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
           item.text.toLowerCase().contains(query);
       return matchesType && matchesStatus && matchesQuery;
     }).toList();
+
+    switch (_sortOrder) {
+      case 'Oldest first':
+        items.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      case 'Author A–Z':
+        items.sort(
+          (a, b) => a.authorName.toLowerCase().compareTo(
+                b.authorName.toLowerCase(),
+              ),
+        );
+      case 'Author Z–A':
+        items.sort(
+          (a, b) => b.authorName.toLowerCase().compareTo(
+                a.authorName.toLowerCase(),
+              ),
+        );
+      case 'Content type':
+        items.sort((a, b) {
+          final typeComparison = a.typeLabel.compareTo(b.typeLabel);
+          return typeComparison != 0
+              ? typeComparison
+              : b.createdAt.compareTo(a.createdAt);
+        });
+      case 'Visible first':
+        items.sort((a, b) {
+          final statusComparison = a.isHidden == b.isHidden
+              ? 0
+              : (a.isHidden ? 1 : -1);
+          return statusComparison != 0
+              ? statusComparison
+              : b.createdAt.compareTo(a.createdAt);
+        });
+      case 'Hidden first':
+        items.sort((a, b) {
+          final statusComparison = a.isHidden == b.isHidden
+              ? 0
+              : (a.isHidden ? -1 : 1);
+          return statusComparison != 0
+              ? statusComparison
+              : b.createdAt.compareTo(a.createdAt);
+        });
+      case 'Rating high–low':
+        items.sort((a, b) {
+          final ratingComparison = (b.rating ?? -1).compareTo(a.rating ?? -1);
+          return ratingComparison != 0
+              ? ratingComparison
+              : b.createdAt.compareTo(a.createdAt);
+        });
+      case 'Rating low–high':
+        items.sort((a, b) {
+          final aRating = a.rating ?? 6;
+          final bRating = b.rating ?? 6;
+          final ratingComparison = aRating.compareTo(bRating);
+          return ratingComparison != 0
+              ? ratingComparison
+              : b.createdAt.compareTo(a.createdAt);
+        });
+      case 'Newest first':
+      default:
+        items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    }
+
+    return items;
   }
 
   @override
@@ -116,6 +180,8 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
                       _header(),
                       const SizedBox(height: 22),
                       _statistics(),
+                      const SizedBox(height: 20),
+                      _analytics(),
                       const SizedBox(height: 20),
                       _filters(),
                       _contentTable(),
@@ -227,6 +293,220 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
         color: borderColor,
       );
 
+  Widget _analytics() {
+    final items = _service.items;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final firstDay = today.subtract(const Duration(days: 6));
+    final recentItems = items.where((item) {
+      final date = item.createdAt.toLocal();
+      final day = DateTime(date.year, date.month, date.day);
+      return !day.isBefore(firstDay) && !day.isAfter(today);
+    }).length;
+    final hiddenRate = items.isEmpty
+        ? 0.0
+        : (_service.hiddenItems / items.length) * 100;
+    final ratings = items
+        .where((item) => item.rating != null)
+        .map((item) => item.rating!)
+        .toList();
+    final averageRating = ratings.isEmpty
+        ? null
+        : ratings.reduce((a, b) => a + b) / ratings.length;
+    final dailyCounts = List<int>.generate(7, (index) {
+      final targetDay = firstDay.add(Duration(days: index));
+      return items.where((item) {
+        final date = item.createdAt.toLocal();
+        return date.year == targetDay.year &&
+            date.month == targetDay.month &&
+            date.day == targetDay.day;
+      }).length;
+    });
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Moderation Analytics',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF111827),
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'A live overview based on community posts and attraction reviews.',
+            style: TextStyle(fontSize: 12, color: Color(0xFF667085)),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _analyticsCard(
+                icon: Icons.calendar_today_outlined,
+                label: 'Posted in last 7 days',
+                value: '$recentItems',
+                color: Colors.blue,
+              ),
+              _analyticsCard(
+                icon: Icons.shield_outlined,
+                label: 'Content hidden',
+                value: '${hiddenRate.toStringAsFixed(1)}%',
+                color: Colors.orange,
+              ),
+              _analyticsCard(
+                icon: Icons.star_outline,
+                label: 'Average review rating',
+                value: averageRating == null
+                    ? 'No ratings'
+                    : '${averageRating.toStringAsFixed(1)} / 5',
+                color: Colors.amber.shade700,
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          const Text(
+            'Posting activity — last 7 days',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          _activityChart(firstDay, dailyCounts),
+        ],
+      ),
+    );
+  }
+
+  Widget _analyticsCard({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      width: 230,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color, size: 21),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  label,
+                  maxLines: 2,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF667085),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _activityChart(DateTime firstDay, List<int> dailyCounts) {
+    final largestCount = dailyCounts.fold<int>(0, (max, value) {
+      return value > max ? value : max;
+    });
+    const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    return SizedBox(
+      height: 145,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: List.generate(7, (index) {
+          final date = firstDay.add(Duration(days: index));
+          final count = dailyCounts[index];
+          final double barHeight = largestCount == 0
+              ? 4.0
+              : (80.0 * (count / largestCount).clamp(0.08, 1.0))
+                  .toDouble();
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    '$count',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    height: barHeight,
+                    width: 30,
+                    decoration: BoxDecoration(
+                      color: count == 0
+                          ? const Color(0xFFE5E7EB)
+                          : mainGreen.withOpacity(0.82),
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(5),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    weekdayLabels[date.weekday - 1],
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF667085),
+                    ),
+                  ),
+                  Text(
+                    '${date.day}/${date.month}',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Color(0xFF98A2B3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
   Widget _filters() {
     return Container(
       padding: const EdgeInsets.all(18),
@@ -235,9 +515,13 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
         border: Border.all(color: borderColor),
       ),
-      child: Row(
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Expanded(
+          SizedBox(
+            width: 320,
             child: TextField(
               controller: _searchController,
               onChanged: (_) => setState(() {}),
@@ -252,7 +536,6 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
               ),
             ),
           ),
-          const SizedBox(width: 14),
           _dropdown(
             value: _typeFilter,
             values: const [
@@ -262,11 +545,25 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
             ],
             onChanged: (value) => setState(() => _typeFilter = value!),
           ),
-          const SizedBox(width: 12),
           _dropdown(
             value: _statusFilter,
             values: const ['All statuses', 'Visible', 'Hidden'],
             onChanged: (value) => setState(() => _statusFilter = value!),
+          ),
+          _dropdown(
+            value: _sortOrder,
+            values: const [
+              'Newest first',
+              'Oldest first',
+              'Author A–Z',
+              'Author Z–A',
+              'Content type',
+              'Visible first',
+              'Hidden first',
+              'Rating high–low',
+              'Rating low–high',
+            ],
+            onChanged: (value) => setState(() => _sortOrder = value!),
           ),
         ],
       ),
@@ -393,6 +690,14 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(item.text, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 3),
+                  Text(
+                    'Posted ${_formatDate(item.createdAt)}',
+                    style: const TextStyle(
+                      color: Color(0xFF667085),
+                      fontSize: 11,
+                    ),
+                  ),
                   if (item.rating != null)
                     Text(
                       '${item.rating}/5 rating',
@@ -432,6 +737,15 @@ class _AdminModerationPageState extends State<AdminModerationPage> {
         ],
       ),
     );
+  }
+
+  String _formatDate(DateTime date) {
+    final localDate = date.toLocal();
+    final month = localDate.month.toString().padLeft(2, '0');
+    final day = localDate.day.toString().padLeft(2, '0');
+    final hour = localDate.hour.toString().padLeft(2, '0');
+    final minute = localDate.minute.toString().padLeft(2, '0');
+    return '${localDate.year}-$month-$day $hour:$minute';
   }
 
   Widget _statusBadge(AdminModerationItem item) {
